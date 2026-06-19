@@ -1,6 +1,7 @@
 package com.privatepayments.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,7 +17,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -136,14 +139,25 @@ private fun TopBar(handle: String, onOpenWallet: () -> Unit) {
 
 @androidx.compose.runtime.Composable
 private fun BalanceCard(revealed: Boolean, balanceText: String, publicText: String, onToggle: () -> Unit) {
-    Column(
+    Box(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(Brush.verticalGradient(listOf(Umbra.SurfaceElevated, Umbra.Surface)))
             .clickable { onToggle() }
-            .padding(24.dp)
     ) {
+        // Purple privacy glow behind the shielded balance (design: radial wash).
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .offset(x = (-20).dp, y = (-40).dp)
+                .size(240.dp)
+                .background(
+                    Brush.radialGradient(listOf(Umbra.Primary.copy(alpha = 0.20f), Color.Transparent)),
+                    CircleShape,
+                )
+        )
+        Column(Modifier.padding(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Shielded balance", color = Umbra.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.width(8.dp))
@@ -183,33 +197,56 @@ private fun BalanceCard(revealed: Boolean, balanceText: String, publicText: Stri
                 fontSize = 14.sp, fontWeight = FontWeight.Medium,
             )
         }
+        }
     }
 }
+
+// Action-button visual language (from the design system):
+//   Public  = amber wash + amber-dark hairline (deposit reveals on-chain)
+//   Primary = filled purple gradient + glow (Send — the headline action)
+//   Neutral = flat surface + hairline (Receive / Withdraw)
+private enum class ActionStyle { Public, Primary, Neutral }
 
 @androidx.compose.runtime.Composable
 private fun ActionRow(onSend: () -> Unit, onDeposit: () -> Unit, onWithdraw: () -> Unit, onReceive: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        // Deposit is the one PUBLIC action (amber); the rest are private (purple).
-        ActionButton(Icons.Filled.SouthWest, "Deposit", Umbra.Public, onClick = onDeposit)
-        ActionButton(Icons.Filled.ArrowUpward, "Send", Umbra.Primary, onClick = onSend)
-        ActionButton(Icons.Filled.QrCode2, "Receive", Umbra.Primary, onClick = onReceive)
-        ActionButton(Icons.Filled.NorthEast, "Withdraw", Umbra.Primary, onClick = onWithdraw)
+        ActionButton(Icons.Filled.SouthWest, "Deposit", ActionStyle.Public, onClick = onDeposit)
+        ActionButton(Icons.Filled.ArrowUpward, "Send", ActionStyle.Primary, onClick = onSend)
+        ActionButton(Icons.Filled.QrCode2, "Receive", ActionStyle.Neutral, onClick = onReceive)
+        ActionButton(Icons.Filled.NorthEast, "Withdraw", ActionStyle.Neutral, onClick = onWithdraw)
     }
 }
 
 @androidx.compose.runtime.Composable
-private fun ActionButton(icon: ImageVector, label: String, accent: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+private fun ActionButton(icon: ImageVector, label: String, style: ActionStyle, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(60.dp).clip(RoundedCornerShape(18.dp))
-                .background(Umbra.SurfaceElevated)
-                .clickable { onClick() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, label, tint = accent, modifier = Modifier.size(24.dp))
+        var box = Modifier.size(56.dp)
+        // Glow only on the filled primary action.
+        if (style == ActionStyle.Primary) {
+            box = box.shadow(12.dp, shape, clip = false, ambientColor = Umbra.Primary, spotColor = Umbra.Primary)
+        }
+        box = box.clip(shape)
+        box = when (style) {
+            ActionStyle.Public -> box.background(Umbra.PublicWash).border(1.dp, Umbra.PublicBorder, shape)
+            ActionStyle.Primary -> box.background(Brush.linearGradient(listOf(Umbra.Primary, Umbra.PrimaryDeep)))
+            ActionStyle.Neutral -> box.background(Umbra.Surface).border(1.dp, Umbra.SurfaceHi, shape)
+        }
+        val iconTint = when (style) {
+            ActionStyle.Public -> Umbra.Public
+            ActionStyle.Primary -> Umbra.IconOnPrimary
+            ActionStyle.Neutral -> Umbra.TextSecondary
+        }
+        Box(box.clickable { onClick() }, contentAlignment = Alignment.Center) {
+            Icon(icon, label, tint = iconTint, modifier = Modifier.size(24.dp))
         }
         Spacer(Modifier.height(8.dp))
-        Text(label, color = Umbra.TextSecondary, fontSize = 12.sp)
+        Text(
+            label,
+            color = if (style == ActionStyle.Primary) Umbra.TextPrimary else Umbra.TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = if (style == ActionStyle.Primary) FontWeight.SemiBold else FontWeight.Medium,
+        )
     }
 }
 

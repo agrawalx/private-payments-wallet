@@ -28,7 +28,11 @@ object Umbra {
     // Public = amber + globe (deposits — reveals address + amount on-chain)
     val Public = Color(0xFFF5A623)
     val PublicWash = Color(0x1FF5A623)    // rgba(245,166,35,.12)
+    val PublicBorder = Color(0xFF4A3A12)  // amber-dark hairline behind deposit
     val Warning = Public
+
+    // Icon ink on the filled purple gradient (the Send action) — near-black.
+    val IconOnPrimary = Color(0xFF0A0A12)
 
     val TextPrimary = Color(0xFFF3F4F7)
     val TextSecondary = Color(0xFFCFD2D8)

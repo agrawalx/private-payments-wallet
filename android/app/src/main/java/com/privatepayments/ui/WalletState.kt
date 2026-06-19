@@ -40,15 +40,29 @@ class WalletState {
         notesScanned = notes.count { !it.spent }
         activity.clear()
         notes.forEach { note ->
+            // Three plain labels (no contacts / no recipient identity in a
+            // privacy-pool transfer): Deposit (public in), Received (private in),
+            // Transferred (private out).
+            val isDeposit = !note.spent && note.kind == "deposit"
+            val title = when {
+                note.spent -> "Transferred"
+                isDeposit -> "Deposit"
+                else -> "Received"
+            }
             activity.add(
                 Activity(
                     icon = if (note.spent) Icons.Filled.NorthEast else Icons.Filled.SouthWest,
-                    title = if (note.spent) "Note spent" else "Note received",
-                    private = true,
+                    title = title,
+                    // Deposit is the one public action (amber badge); the rest are shielded.
+                    private = !isDeposit,
                     amount = "%s%.4f".format(if (note.spent) "−" else "+", note.amount / 1e7),
                     positive = !note.spent,
                     time = "leaf #${note.leafIndex}",
-                    subtitle = if (note.spent) "Spent · reconciled on-device" else "Unspent · decrypted on-device",
+                    subtitle = when {
+                        note.spent -> "Spent · reconciled on-device"
+                        isDeposit -> "Moved into the pool"
+                        else -> "Decrypted on-device"
+                    },
                 ),
             )
         }

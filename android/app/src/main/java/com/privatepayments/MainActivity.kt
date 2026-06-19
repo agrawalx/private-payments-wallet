@@ -129,6 +129,9 @@ class MainActivity : ComponentActivity() {
                     var txHash by remember { mutableStateOf("") }
                     var pendingAmount by remember { mutableStateOf(0L) }
                     var pendingRecipient by remember { mutableStateOf("") }
+                    // Blinding of the note created by an in-flight deposit; recorded
+                    // on success so it can be labelled "Deposit" once scanned back.
+                    var pendingDepositBlinding by remember { mutableStateOf<String?>(null) }
                     var walletAddr by remember { mutableStateOf<String?>(null) }
                     // Bumps on any account change (load / switch / add); re-derives
                     // the active account's shielded keys + per-account note store.
@@ -289,7 +292,13 @@ class MainActivity : ComponentActivity() {
                                     var paramsJson = when (op) {
                                         Op.Deposit -> buildDepositParams(
                                             params.getValue(op), pendingAmount.toString(), commitmentTopics, 10u,
-                                        )
+                                        ).also { pj ->
+                                            // Stash the deposit note's blinding to tag it on scan.
+                                            pendingDepositBlinding = runCatching {
+                                                org.json.JSONObject(pj).getJSONArray("outputs")
+                                                    .getJSONObject(0).getString("blinding")
+                                            }.getOrNull()
+                                        }
                                         Op.Withdraw -> {
                                             val sel = CoinSelector.select(noteStore.unspentNotes(), pendingAmount)
                                                 ?: throw IllegalStateException("Not enough in 2 notes for this amount")
@@ -346,7 +355,11 @@ class MainActivity : ComponentActivity() {
                                 advance(3)
                                 hash
                             },
-                            onDone = { hash -> txHash = hash; screen = Screen.Success },
+                            onDone = { hash ->
+                                if (op == Op.Deposit) pendingDepositBlinding?.let { noteStore.recordDepositBlinding(it) }
+                                pendingDepositBlinding = null
+                                txHash = hash; screen = Screen.Success
+                            },
                             onCancel = { screen = Screen.Home },
                         )
                         Screen.Success -> SuccessScreen(op.verb, amountXlm, txHash) { screen = Screen.Home }

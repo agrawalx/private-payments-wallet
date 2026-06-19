@@ -13,6 +13,12 @@ data class StoredNote(
     val nullifier: String,
     val blinding: String,
     val spent: Boolean,
+    /**
+     * How this note entered the wallet: `"deposit"` (we moved public funds in)
+     * or `"received"` (it arrived via a shielded transfer). Outgoing/spent notes
+     * are surfaced as "Transferred" regardless. Used only for the activity label.
+     */
+    val kind: String = "received",
 )
 
 /**
@@ -30,7 +36,7 @@ data class StoredNote(
  * then `SUM(amount) WHERE NOT spent`.
  */
 class NoteStore(context: Context, accountIndex: Int = 0) :
-    SQLiteOpenHelper(context, "stella_state_$accountIndex.db", null, 2) {
+    SQLiteOpenHelper(context, "stella_state_$accountIndex.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -40,16 +46,21 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                  amount     INTEGER NOT NULL,
                  nullifier  TEXT NOT NULL,
                  blinding   TEXT NOT NULL,
-                 spent      INTEGER NOT NULL DEFAULT 0
+                 spent      INTEGER NOT NULL DEFAULT 0,
+                 kind       TEXT NOT NULL DEFAULT 'received'
                )"""
         )
         db.execSQL("CREATE TABLE seen_nullifiers(nullifier TEXT PRIMARY KEY)")
+        // Blindings of notes WE created by depositing — lets us label them
+        // "Deposit" (vs "Received") once they're scanned back in.
+        db.execSQL("CREATE TABLE my_deposits(blinding TEXT PRIMARY KEY)")
         db.execSQL("CREATE INDEX idx_notes_nullifier ON user_notes(nullifier)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
         db.execSQL("DROP TABLE IF EXISTS user_notes")
         db.execSQL("DROP TABLE IF EXISTS seen_nullifiers")
+        db.execSQL("DROP TABLE IF EXISTS my_deposits")
         onCreate(db)
     }
 
@@ -88,16 +99,33 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
         }
     }
 
+    /** Record the blinding of a note we just created by depositing. */
+    fun recordDepositBlinding(blinding: String) {
+        writableDatabase.insertWithOnConflict(
+            "my_deposits", null,
+            ContentValues().apply { put("blinding", blinding) },
+            SQLiteDatabase.CONFLICT_IGNORE,
+        )
+    }
+
     /**
-     * Mark every note spent whose nullifier is now on-chain. Returns the number
-     * of notes newly marked spent.
+     * Mark every note spent whose nullifier is now on-chain, and tag any note
+     * whose blinding we recorded at deposit time as a deposit (vs a received
+     * transfer). Returns the number of notes newly marked spent.
      */
-    fun reconcile(): Int =
-        writableDatabase.compileStatement(
+    fun reconcile(): Int {
+        val db = writableDatabase
+        db.execSQL(
+            """UPDATE user_notes SET kind = 'deposit'
+               WHERE kind <> 'deposit'
+                 AND blinding IN (SELECT blinding FROM my_deposits)"""
+        )
+        return db.compileStatement(
             """UPDATE user_notes SET spent = 1
                WHERE spent = 0
                  AND nullifier IN (SELECT nullifier FROM seen_nullifiers)"""
         ).executeUpdateDelete()
+    }
 
     /** Unspent shielded balance, in stroops. */
     fun unspentBalanceStroops(): Long =
@@ -108,12 +136,12 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
     /** All notes, newest leaf first (for activity + coin selection). */
     fun notes(): List<StoredNote> =
         readableDatabase.rawQuery(
-            "SELECT leaf_index, commitment, amount, nullifier, blinding, spent FROM user_notes ORDER BY leaf_index DESC",
+            "SELECT leaf_index, commitment, amount, nullifier, blinding, spent, kind FROM user_notes ORDER BY leaf_index DESC",
             null,
         ).use { c ->
             buildList {
                 while (c.moveToNext()) {
-                    add(StoredNote(c.getLong(0), c.getString(1), c.getLong(2), c.getString(3), c.getString(4), c.getInt(5) != 0))
+                    add(StoredNote(c.getLong(0), c.getString(1), c.getLong(2), c.getString(3), c.getString(4), c.getInt(5) != 0, c.getString(6)))
                 }
             }
         }
@@ -143,7 +171,8 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                     .put("amount", n.amount)
                     .put("nullifier", n.nullifier)
                     .put("blinding", n.blinding)
-                    .put("spent", n.spent),
+                    .put("spent", n.spent)
+                    .put("kind", n.kind),
             )
         }
         return org.json.JSONObject().put("version", 1).put("notes", arr).toString()
@@ -167,6 +196,7 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                         put("nullifier", o.getString("nullifier"))
                         put("blinding", o.getString("blinding"))
                         put("spent", if (o.optBoolean("spent")) 1 else 0)
+                        put("kind", o.optString("kind", "received"))
                     },
                     SQLiteDatabase.CONFLICT_REPLACE,
                 )

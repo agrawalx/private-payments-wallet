@@ -35,37 +35,48 @@ object IndexerClient {
     private const val BASE = "http://127.0.0.1:8080"
 
     fun fetchStatus(): SyncStatus = try {
-        val conn = URL("$BASE/events?cursor=0&limit=100").openConnection() as HttpURLConnection
-        conn.connectTimeout = 3000
-        conn.readTimeout = 3000
-        val body = conn.inputStream.bufferedReader().use { it.readText() }
-        val json = JSONObject(body)
-        val events = json.getJSONArray("events")
-        val n = events.length()
-        var type: String? = null
-        var ledger: Long? = null
+        // Page through the cursor-paginated feed until exhausted — a single
+        // fixed `limit` silently drops the newest events once the chain has
+        // more than one page (which is exactly when fresh deposits go missing).
         val commitments = mutableListOf<CommitmentEvent>()
         val nullifierTopics = mutableListOf<String>()
         val leafAddedValues = mutableListOf<String>()
-        for (i in 0 until n) {
-            val e = events.getJSONObject(i)
-            val topics = e.getJSONArray("topic")
-            val t = decodeSymbol(topics.optString(0))
-            if (i == n - 1) {
-                type = t
+        var type: String? = null
+        var ledger: Long? = null
+        var total = 0
+        var cursor = 0L
+        val pageLimit = 1000 // indexer clamps to [1, 1000]
+        while (true) {
+            val conn = URL("$BASE/events?cursor=$cursor&limit=$pageLimit").openConnection() as HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 5000
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(body)
+            val events = json.getJSONArray("events")
+            val n = events.length()
+            for (i in 0 until n) {
+                val e = events.getJSONObject(i)
+                val topics = e.getJSONArray("topic")
+                val t = decodeSymbol(topics.optString(0))
+                type = t // events are seq-ascending, so the final one is newest
                 ledger = e.optLong("ledger")
+                when (t) {
+                    "new_commitment_event" ->
+                        commitments.add(CommitmentEvent(topics.optString(1), e.optString("value")))
+                    "new_nullifier_event" ->
+                        nullifierTopics.add(topics.optString(1))
+                    "LeafAdded" ->
+                        leafAddedValues.add(e.optString("value"))
+                }
             }
-            when (t) {
-                "new_commitment_event" ->
-                    commitments.add(CommitmentEvent(topics.optString(1), e.optString("value")))
-                "new_nullifier_event" ->
-                    nullifierTopics.add(topics.optString(1))
-                "LeafAdded" ->
-                    leafAddedValues.add(e.optString("value"))
-            }
+            total += n
+            val next = json.optLong("cursor", cursor)
+            // Last page (short) or no forward progress → done.
+            if (n < pageLimit || next == cursor) break
+            cursor = next
         }
         SyncStatus(
-            reachable = true, count = n, latestType = type, latestLedger = ledger,
+            reachable = true, count = total, latestType = type, latestLedger = ledger,
             commitments = commitments, nullifierTopics = nullifierTopics,
             leafAddedValues = leafAddedValues,
         )
