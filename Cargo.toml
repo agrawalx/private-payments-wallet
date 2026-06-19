@@ -1,0 +1,3 @@
+[workspace]
+members = ["prover-ffi", "fixture-gen", "indexer"]
+resolver = "2"

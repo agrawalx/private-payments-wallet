@@ -1,0 +1,60 @@
+[package]
+name = "prover-ffi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "prover_ffi"
+# lib       -> desktop integration tests (Gate 2)
+# cdylib    -> Android .so (Gate 1 / Gate 3) + UniFFI scaffolding
+# staticlib -> iOS later
+crate-type = ["lib", "cdylib", "staticlib"]
+
+# uniffi-bindgen CLI for generating the Kotlin bindings (library mode).
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+# Reference prover crate (Wasmer-free: r1cs replay + ark-groth16), pulled from
+# the upstream Nethermind repo at a pinned commit.
+prover = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f" }
+types = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f" }
+# Canonical selective-disclosure receipt format + verification (Phase 6). Pure
+# (anyhow/hex/prover/sha2/types — no network), so safe for the Android .so.
+disclosure = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f" }
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# Must match the num-bigint version rust-witness + the arkworks stack use (0.4).
+num-bigint = "0.4"
+rust-witness = "0.1"
+uniffi = { version = "0.28", features = ["cli"] }
+# For the vendored ext-data hash (copied from the stellar crate to avoid its
+# reqwest/tokio dependency). Versions match the reference workspace.
+sha3 = "0.11"
+stellar-xdr = { version = "26.0.0", default-features = false, features = ["curr", "std", "base64"] }
+base64 = "0.22"
+# In-app Soroban `transact` building + signing — all PURE (no network). The RPC
+# round-trips moved to Kotlin (Android system TLS), so the `stellar` crate (and
+# its `reqwest`/`rustls-platform-verifier` chain, unusable under Android JNA) is
+# gone. We vendor its pure tx-build/encode fns into `src/submit.rs` instead.
+ed25519-dalek = "2"
+sha2 = "0.10"
+stellar-strkey = "0.0.16"
+rand = "0.8"
+# BIP39 seed phrase (Phase 4 wallet) + SLIP-0010 ed25519 derivation (SEP-5).
+bip39 = { version = "2", features = ["rand"] }
+hmac = "0.12"
+
+[dev-dependencies]
+# Desktop-only: the `submit_deposit_onchain` test drives the RPC itself to
+# validate the build/sign split end-to-end off-device. Not linked into the
+# Android `.so` (dev-deps never reach the cdylib target).
+reqwest = { version = "0.13.3", features = ["json", "blocking"] }
+
+[build-dependencies]
+rust-witness = "0.1"

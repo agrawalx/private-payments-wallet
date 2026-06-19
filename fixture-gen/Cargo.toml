@@ -1,0 +1,19 @@
+[package]
+name = "fixture-gen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# One-shot dev tool: builds a known-good policy_tx_2_2 circuit-input vector
+# using the reference repo's test utilities and writes it as flat JSON for the
+# Milestone 0 desktop/on-device proof tests. Not shipped in the app.
+
+[dependencies]
+# Reference crates from the upstream Nethermind repo, pinned to a commit.
+circuits = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f", features = ["std"] }
+zkhash = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f" }
+prover = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f" }
+types = { git = "https://github.com/NethermindEth/stellar-private-payments", rev = "5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f" }
+num-bigint = "0.4"
+anyhow = "1"
+serde_json = "1"
