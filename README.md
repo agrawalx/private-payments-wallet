@@ -33,8 +33,15 @@ their own gas, so no relayer server is required.
 
 ## 1. Run the indexer
 
-The indexer polls the Soroban RPC for the pool + ASP contract events and serves them to the wallet
-over HTTP with cursor pagination.
+The indexer polls the Soroban RPC for the pool + ASP contract events and serves them to the wallet.
+
+> **You must seed it from the provided dump — do not start a fresh indexer from scratch.**
+> Soroban testnet RPC only retains ~24h of events, so a fresh indexer can't fetch the pool's earlier
+> history. The wallet rebuilds the *complete* commitment + ASP Merkle trees from that history, so a
+> partial indexer produces wrong roots and **spends will fail**. `indexer/seed/stella_events.sql`
+> contains the full event history; restore it first, then the indexer only fetches *new* events from
+> there. Inserts are idempotent (`event_id` is `UNIQUE`, `ON CONFLICT DO NOTHING`), so any overlap is
+> deduped — no duplicate events.
 
 ```sh
 # (a) Postgres — matches the indexer's default DATABASE_URL (localhost:5434, user/pw/db=indexer)
@@ -43,16 +50,25 @@ docker run -d --name pp-indexer-pg -p 5434:5432 \
   postgres:16
 # next time, just: docker start pp-indexer-pg
 
-# (b) build + run the indexer (from the repo root)
+# (b) seed the full event history into the DB (run once)
+docker exec -i pp-indexer-pg psql -U indexer -d indexer < indexer/seed/stella_events.sql
+
+# (c) build + run the indexer — it resumes from the seeded cursor and pulls only NEW events
 cargo build --release -p indexer
 
 INDEXER_CONTRACTS="CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V,CC5XHHWNZDBLDBSYI54YBXN2RSJU52T4QTHMEYEFGIBG7CYAWLNWV5ZO,CDS5Q4CFZXTFQCTKKYKXROLWVEIM4IBQZFLL3YBDITD3ZOU5SSSRW2GN" \
 INDEXER_START_LEDGER=3163570 \
 ./target/release/indexer
 
-# (c) sanity check (in another shell)
-curl http://127.0.0.1:8080/health        # -> {"events":N,"status":"ok"}
+# (d) sanity check (in another shell)
+curl http://127.0.0.1:8080/health        # -> {"events":N,"status":"ok"} ; N >= 125
 ```
+
+> **Keeping the dump current:** to refresh the seed after more activity, regenerate it from a
+> caught-up indexer DB:
+> ```sh
+> docker exec pp-indexer-pg pg_dump -U indexer -d indexer --clean --if-exists > indexer/seed/stella_events.sql
+> ```
 
 Env vars (all have testnet defaults; see `indexer/src/main.rs`):
 `INDEXER_CONTRACTS` (pool, ASP-membership, ASP-non-membership), `INDEXER_START_LEDGER`,
