@@ -54,6 +54,30 @@ class WalletManager(context: Context) {
     /** The active account's per-seed shielded (note + encryption) keypair. */
     fun shieldedKeys(): KeyBundle = accountShieldedKeys(mnemonic!!, activeIndex.toUInt())
 
+    /** True if a wallet is already stored (decides onboarding vs. straight to Home). */
+    fun hasWallet(): Boolean = prefs.getString("mnemonic", null) != null
+
+    /** Load the stored wallet. Call only when [hasWallet] is true. Off the main thread. */
+    fun load() {
+        val savedPhrase = prefs.getString("mnemonic", null) ?: return
+        mnemonic = savedPhrase
+        accountCount = prefs.getInt("accountCount", 1).coerceAtLeast(1)
+        activeIndex = prefs.getInt("activeIndex", 0).coerceIn(0, accountCount - 1)
+        derive(activeIndex)
+    }
+
+    /** Create a brand-new wallet (generate phrase, store encrypted). Returns the phrase.
+     *  Funding is manual — use [fundFromTestnet] (the Home "Fund from testnet" button). */
+    fun createNew(): String {
+        val phrase = generateMnemonic(12u)
+        mnemonic = phrase
+        accountCount = 1
+        activeIndex = 0
+        prefs.edit().putString("mnemonic", phrase).putInt("accountCount", 1).putInt("activeIndex", 0).apply()
+        derive(0)
+        return phrase
+    }
+
     /** Returns true if a wallet already existed; loads or creates one. Off the main thread. */
     fun loadOrCreate(): Boolean {
         val savedPhrase = prefs.getString("mnemonic", null)
@@ -84,19 +108,21 @@ class WalletManager(context: Context) {
         activeIndex = 0
         prefs.edit().putString("mnemonic", cleaned).putInt("accountCount", 1).putInt("activeIndex", 0).apply()
         derive(0)
-        runCatching { friendbotFund(address) }
         return true
     }
 
-    /** Derive + activate a new account at the next index; fund it. Returns its index. */
+    /** Derive + activate a new account at the next index. Returns its index.
+     *  Not funded automatically — use [fundFromTestnet]. */
     fun addAccount(): Int {
         val newIndex = accountCount
         accountCount += 1
         prefs.edit().putInt("accountCount", accountCount).apply()
         setActive(newIndex)
-        runCatching { friendbotFund(address) }
         return newIndex
     }
+
+    /** Friendbot-fund the active account (testnet). Returns true on success. */
+    fun fundFromTestnet(): Boolean = friendbotFund(address)
 
     /** Switch the active account (re-derives address/secret). */
     fun setActive(index: Int) {

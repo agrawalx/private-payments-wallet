@@ -27,7 +27,9 @@ import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.ApiException
 import com.privatepayments.net.DriveBackup
 import com.privatepayments.net.IndexerClient
+import com.privatepayments.net.RelayerClient
 import com.privatepayments.net.SorobanRpc
+import com.privatepayments.state.ChainStore
 import com.privatepayments.state.CoinSelector
 import com.privatepayments.state.NoteStore
 import com.privatepayments.state.WalletBackup
@@ -38,8 +40,12 @@ import com.privatepayments.ui.DisclosureScreen
 import com.privatepayments.ui.HomeScreen
 import com.privatepayments.ui.ProofScreen
 import com.privatepayments.ui.ReceiveScreen
+import com.privatepayments.ui.ConfirmScreen
+import com.privatepayments.ui.OnboardingScreen
 import com.privatepayments.ui.RecoveryScreen
+import com.privatepayments.ui.RegisterScreen
 import com.privatepayments.ui.SettingsScreen
+import com.privatepayments.ui.SplashScreen
 import com.privatepayments.ui.copyToClipboard
 import com.privatepayments.ui.openUrl
 import kotlinx.coroutines.CompletableDeferred
@@ -51,6 +57,8 @@ import uniffi.prover_ffi.buildAspProofs
 import uniffi.prover_ffi.buildDepositParams
 import uniffi.prover_ffi.buildTransferParams
 import uniffi.prover_ffi.buildWithdrawParams
+import uniffi.prover_ffi.aspMembershipLeafDec
+import uniffi.prover_ffi.buildUnsignedAspRegister
 import uniffi.prover_ffi.decodeAspLeaf
 import uniffi.prover_ffi.notePublicKey
 import com.privatepayments.ui.WalletState
@@ -79,9 +87,17 @@ import uniffi.prover_ffi.rebuildInputPath
 import uniffi.prover_ffi.scanNote
 
 private const val POOL_ID = "CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V"
+private const val ASP_MEMBERSHIP_ID = "CC5XHHWNZDBLDBSYI54YBXN2RSJU52T4QTHMEYEFGIBG7CYAWLNWV5ZO"
 private const val RPC_URL = "https://soroban-testnet.stellar.org"
 
-private enum class Screen { Home, Amount, Proof, Success, Recovery, Disclosure, Backup, Settings, Receive }
+// Route withdraw/transfer through the relayer (its account is the on-chain
+// source/sender/fee-payer) so this wallet's public account stays unlinkable.
+// Requires the relayer service reachable at RelayerClient.BASE (adb reverse
+// tcp:8090). When false, the wallet self-submits all ops from its own account
+// (pays its own gas) — no relayer server needed. Deposit always self-submits.
+private const val USE_RELAYER = false
+
+private enum class Screen { Splash, Onboarding, Home, Amount, Confirm, Proof, Success, Recovery, Disclosure, Backup, Settings, Receive, Register }
 
 /**
  * A shielded primitive the app can run on-device. The amount (and recipient,
@@ -97,12 +113,14 @@ private enum class Op(
     /** null = no recipient field (deposit). */
     val recipientLabel: String?,
     val recipientHint: String,
+    /** True if a blank recipient is valid (transfer → re-shield to self). */
+    val recipientOptional: Boolean = false,
 ) {
     Deposit("deposit_onchain.json", "Deposit to the pool", "Deposited", true, null, ""),
     Withdraw("withdraw_onchain.json", "Withdraw", "Withdrawn privately", false,
         "Recipient address (G…)", "G… public Stellar address"),
     Transfer("transfer_onchain.json", "Send privately", "Sent privately", false,
-        "Recipient shielded address (blank = yourself)", "stella shielded address"),
+        "Recipient shielded address (blank = yourself)", "stella shielded address", recipientOptional = true),
 }
 
 class MainActivity : ComponentActivity() {
@@ -124,7 +142,7 @@ class MainActivity : ComponentActivity() {
                 Surface(color = Umbra.Bg) {
                     val ctx = this@MainActivity
                     val wallet = remember { WalletState() }
-                    var screen by remember { mutableStateOf(Screen.Home) }
+                    var screen by remember { mutableStateOf(Screen.Splash) }
                     var op by remember { mutableStateOf(Op.Deposit) }
                     var txHash by remember { mutableStateOf("") }
                     var pendingAmount by remember { mutableStateOf(0L) }
@@ -144,7 +162,17 @@ class MainActivity : ComponentActivity() {
                         if (walletAddr != null) runCatching { walletManager.shieldedKeys() }.getOrNull() else null
                     }
                     val noteStore = remember(accountEpoch) { NoteStore(ctx, walletManager.activeIndex) }
+                    // Durable, account-independent mirror of chain events (cursor + commitments + ASP leaves).
+                    val chainStore = remember { ChainStore(ctx) }
                     val hx = { b: ByteArray -> "0x" + b.joinToString("") { "%02x".format(it) } }
+
+                    // This account's ASP membership leaf, and whether it's enrolled
+                    // ("registered"). Spending (deposit/send/withdraw) requires it;
+                    // receiving does not. Recomputed when keys or the ASP tree change.
+                    val myAspLeaf = remember(shielded) {
+                        shielded?.let { runCatching { aspMembershipLeafDec(hx(it.notePublic)) }.getOrNull() }
+                    }
+                    val isRegistered = myAspLeaf != null && aspLeaves.contains(myAspLeaf)
 
                     // Phase 7 backup: Google Sign-In bridged into a suspend fn via
                     // a CompletableDeferred resolved in the activity-result callback.
@@ -191,11 +219,50 @@ class MainActivity : ComponentActivity() {
                     }
                     var sync by remember { mutableStateOf("Connecting to indexer…") }
 
+                    // Self-serve ASP enrollment ("Register"): submit an `insert_leaf`
+                    // of this account's note leaf, signed by the account itself (the
+                    // contract is permissionless), then pull deltas until the new leaf
+                    // is mirrored locally so spending can proceed without a race.
+                    val doRegister: suspend () -> Boolean = reg@{
+                        val sk = shielded ?: error("wallet not ready")
+                        val addr = walletManager.address
+                        withContext(Dispatchers.IO) {
+                            val entryXdr = SorobanRpc.getAccountEntryXdr(RPC_URL, accountLedgerKey(addr))
+                            val unsigned = buildUnsignedAspRegister(ASP_MEMBERSHIP_ID, addr, entryXdr, hx(sk.notePublic))
+                            val sim = SorobanRpc.simulate(RPC_URL, unsigned)
+                            val signed = finalizeAndSign(unsigned, sim, walletManager.secret())
+                            SorobanRpc.pollTransaction(RPC_URL, SorobanRpc.send(RPC_URL, signed))
+                        }
+                        val target = myAspLeaf
+                        var ok = false
+                        var tries = 0
+                        while (tries < 10 && !ok) {
+                            val d = withContext(Dispatchers.IO) { IndexerClient.fetchSince(chainStore.cursor()) }
+                            if (d.reachable) {
+                                d.commitments.forEach { chainStore.appendCommitment(it.seq, it.commitmentTopic, it.value) }
+                                d.leaves.forEach { lv ->
+                                    runCatching { decodeAspLeaf(lv.value) }.getOrNull()?.let { chainStore.appendAspLeaf(lv.seq, it) }
+                                }
+                                chainStore.setCursor(d.newCursor)
+                            }
+                            ok = target != null && chainStore.aspLeaves().contains(target)
+                            if (!ok) { delay(1500); tries++ }
+                        }
+                        commitmentTopics = chainStore.commitmentTopics()
+                        aspLeaves = chainStore.aspLeaves()
+                        ok
+                    }
+
                     // Create/load the self-custodial wallet (Keystore-encrypted).
                     LaunchedEffect(Unit) {
-                        withContext(Dispatchers.IO) { walletManager.loadOrCreate() }
-                        walletAddr = walletManager.address
-                        accountEpoch++
+                        if (withContext(Dispatchers.IO) { walletManager.hasWallet() }) {
+                            withContext(Dispatchers.IO) { walletManager.load() }
+                            walletAddr = walletManager.address
+                            accountEpoch++
+                            screen = Screen.Home
+                        } else {
+                            screen = Screen.Onboarding // first run
+                        }
                     }
 
                     // Live sync (Phase 3 state layer): poll the indexer → scan
@@ -203,19 +270,27 @@ class MainActivity : ComponentActivity() {
                     // → reconcile (mark spent) → balance = unspent notes only.
                     LaunchedEffect(accountEpoch) {
                         while (true) {
-                            val s = withContext(Dispatchers.IO) { IndexerClient.fetchStatus() }
+                            // 0. Pull only the DELTA since our durable cursor, append it to
+                            //    the global chain mirror (no more full re-fetch every poll).
+                            val delta = withContext(Dispatchers.IO) { IndexerClient.fetchSince(chainStore.cursor()) }
                             val sk = shielded
-                            if (s.reachable && sk != null) {
-                                commitmentTopics = s.commitments.map { it.commitmentTopic }
+                            if (delta.reachable && sk != null) {
                                 withContext(Dispatchers.Default) {
-                                    // Live ASP membership leaves (index order).
-                                    aspLeaves = s.leafAddedValues.mapNotNull {
-                                        runCatching { decodeAspLeaf(it) }.getOrNull()
+                                    delta.commitments.forEach { chainStore.appendCommitment(it.seq, it.commitmentTopic, it.value) }
+                                    delta.leaves.forEach { lv ->
+                                        runCatching { decodeAspLeaf(lv.value) }.getOrNull()?.let { chainStore.appendAspLeaf(lv.seq, it) }
                                     }
-                                    // 1. Scan with THIS account's per-seed shielded keys.
-                                    s.commitments.forEach { ev ->
+                                    chainStore.setCursor(delta.newCursor)
+                                    // Full ordered lists (from local DB) feed proving.
+                                    commitmentTopics = chainStore.commitmentTopics()
+                                    aspLeaves = chainStore.aspLeaves()
+                                    // 1. Scan only commitments THIS account hasn't seen yet,
+                                    //    with its per-seed keys. (On account switch, scannedSeq=0
+                                    //    → it rescans everything once.)
+                                    val from = chainStore.scannedSeq(walletManager.activeIndex)
+                                    chainStore.commitmentsSince(from).forEach { ev ->
                                         runCatching {
-                                            scanNote(ev.commitmentTopic, ev.value, sk.encryptionPrivate, sk.notePrivate)
+                                            scanNote(ev.topic, ev.value, sk.encryptionPrivate, sk.notePrivate)
                                         }.getOrNull()?.let { note ->
                                             noteStore.upsertNote(
                                                 note.leafIndex.toLong(), note.commitment,
@@ -223,8 +298,9 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
-                                    // 2. Record on-chain nullifiers, then reconcile.
-                                    val seen = s.nullifierTopics.mapNotNull {
+                                    chainStore.setScannedSeq(walletManager.activeIndex, chainStore.cursor())
+                                    // 2. Record new on-chain nullifiers, then reconcile.
+                                    val seen = delta.nullifierTopics.mapNotNull {
                                         runCatching { decodeNullifierTopic(it) }.getOrNull()
                                     }
                                     noteStore.addNullifiers(seen)
@@ -242,19 +318,31 @@ class MainActivity : ComponentActivity() {
                                 wallet.applyPublic(pub)
                             }
                             val c = noteStore.counts()
-                            sync = if (!s.reachable) "Indexer unreachable"
-                            else "Synced · ${s.count} events · ${c.unspent} unspent / ${c.spent} spent note(s)"
+                            sync = if (!delta.reachable) "Indexer unreachable"
+                            else "Synced · ${chainStore.commitmentCount()} commitments · ${c.unspent} unspent / ${c.spent} spent note(s)"
                             delay(5000)
                         }
                     }
 
-                    val handle = walletAddr?.let { "${it.take(6)}…${it.takeLast(4)}" } ?: "creating wallet…"
-                    val start: (Op) -> Unit = { chosen -> if (walletAddr != null) { op = chosen; screen = Screen.Amount } }
+                    // Avatar = the active account as a letter (A = account 0, B = 1, …).
+                    val accountLabel = remember(accountEpoch) { ('A' + walletManager.activeIndex.coerceIn(0, 25)).toString() }
+                    // Spending requires ASP enrollment — route unregistered accounts
+                    // through Register first (receiving needs no enrollment).
+                    val start: (Op) -> Unit = { chosen ->
+                        if (walletAddr != null) { op = chosen; screen = if (isRegistered) Screen.Amount else Screen.Register }
+                    }
                     val amountXlm = "%.4f".format(pendingAmount / 1e7)
 
                     when (screen) {
+                        Screen.Splash -> SplashScreen()
+                        Screen.Onboarding -> OnboardingScreen(
+                            onCreate = { withContext(Dispatchers.IO) { walletManager.createNew() } },
+                            onImport = { p -> withContext(Dispatchers.IO) { walletManager.importPhrase(p) } },
+                            onDone = { walletAddr = walletManager.address; accountEpoch++; screen = Screen.Home },
+                        )
                         Screen.Home -> HomeScreen(
-                            handle = handle,
+                            address = walletAddr ?: "",
+                            accountLabel = accountLabel,
                             balanceText = wallet.balanceText(),
                             publicText = wallet.publicText(),
                             activity = wallet.activity,
@@ -265,6 +353,9 @@ class MainActivity : ComponentActivity() {
                             onReceive = { screen = Screen.Receive },
                             onSettings = { screen = Screen.Settings },
                             onShareProof = { if (walletAddr != null) screen = Screen.Disclosure },
+                            registered = isRegistered,
+                            onRegister = { if (walletAddr != null) screen = Screen.Register },
+                            onFund = { withContext(Dispatchers.IO) { walletManager.fundFromTestnet() } },
                         )
                         Screen.Amount -> AmountScreen(
                             title = op.title,
@@ -273,8 +364,27 @@ class MainActivity : ComponentActivity() {
                             maxStroops = if (op == Op.Deposit) null else CoinSelector.maxSpendable(noteStore.unspentNotes()),
                             recipientLabel = op.recipientLabel,
                             recipientHint = op.recipientHint,
-                            onConfirm = { amt, recip -> pendingAmount = amt; pendingRecipient = recip; screen = Screen.Proof },
+                            recipientOptional = op.recipientOptional,
+                            onConfirm = { amt, recip -> pendingAmount = amt; pendingRecipient = recip; screen = Screen.Confirm },
                             onCancel = { screen = Screen.Home },
+                        )
+                        Screen.Confirm -> ConfirmScreen(
+                            title = op.title,
+                            isPublic = op.isPublic,
+                            amountXlm = amountXlm,
+                            recipient = when {
+                                op == Op.Deposit -> "Shielded pool"
+                                op == Op.Transfer && pendingRecipient.isBlank() -> "Yourself (re-shield)"
+                                pendingRecipient.length > 16 -> "${pendingRecipient.take(10)}…${pendingRecipient.takeLast(6)}"
+                                else -> pendingRecipient
+                            },
+                            typeLabel = when (op) {
+                                Op.Deposit -> "Public deposit"
+                                Op.Withdraw -> "Private withdrawal"
+                                Op.Transfer -> "Private send"
+                            },
+                            onConfirm = { screen = Screen.Proof },
+                            onCancel = { screen = Screen.Amount },
                         )
                         Screen.Proof -> ProofScreen(
                             title = op.title,
@@ -338,19 +448,30 @@ class MainActivity : ComponentActivity() {
                                 val bundle = withContext(Dispatchers.Default) { provePolicyTx22Json(a.circuitInputsJson) }
                                 advance(2)
                                 val hash = withContext(Dispatchers.IO) {
-                                    val addr = walletManager.address
-                                    val entryXdr = SorobanRpc.getAccountEntryXdr(RPC_URL, accountLedgerKey(addr))
-                                    val unsigned = buildUnsignedTransact(
-                                        POOL_ID, addr, entryXdr,
-                                        bundle.proof, bundle.publicInputs, a.extDataHash,
-                                        a.extRecipient, a.extAmount,
-                                        a.encryptedOutput0, a.encryptedOutput1,
-                                    )
-                                    val sim = SorobanRpc.simulate(RPC_URL, unsigned)
-                                    val signed = finalizeAndSign(unsigned, sim, walletManager.secret())
-                                    val h = SorobanRpc.send(RPC_URL, signed)
-                                    SorobanRpc.pollTransaction(RPC_URL, h)
-                                    h
+                                    // Withdraw/transfer go through the relayer so the
+                                    // submitting account isn't this wallet's public one
+                                    // (deposit is public anyway, so it self-submits). The
+                                    // proof's ext_data_hash binds recipient+amount, so the
+                                    // relayer can't redirect funds.
+                                    if (USE_RELAYER && op != Op.Deposit) {
+                                        RelayerClient.relay(
+                                            bundle.proof, bundle.publicInputs, a.extDataHash,
+                                            a.extRecipient, a.extAmount,
+                                            a.encryptedOutput0, a.encryptedOutput1,
+                                        )
+                                    } else {
+                                        val addr = walletManager.address
+                                        val entryXdr = SorobanRpc.getAccountEntryXdr(RPC_URL, accountLedgerKey(addr))
+                                        val unsigned = buildUnsignedTransact(
+                                            POOL_ID, addr, entryXdr,
+                                            bundle.proof, bundle.publicInputs, a.extDataHash,
+                                            a.extRecipient, a.extAmount,
+                                            a.encryptedOutput0, a.encryptedOutput1,
+                                        )
+                                        val sim = SorobanRpc.simulate(RPC_URL, unsigned)
+                                        val signed = finalizeAndSign(unsigned, sim, walletManager.secret())
+                                        SorobanRpc.pollTransaction(RPC_URL, SorobanRpc.send(RPC_URL, signed))
+                                    }
                                 }
                                 advance(3)
                                 hash
@@ -363,6 +484,11 @@ class MainActivity : ComponentActivity() {
                             onCancel = { screen = Screen.Home },
                         )
                         Screen.Success -> SuccessScreen(op.verb, amountXlm, txHash) { screen = Screen.Home }
+                        Screen.Register -> RegisterScreen(
+                            onRegister = doRegister,
+                            onRegistered = { screen = Screen.Home },
+                            onCancel = { screen = Screen.Home },
+                        )
                         Screen.Receive -> ReceiveScreen(
                             stellarAddress = walletManager.address,
                             shieldedAddress = shielded?.let { "stella:" + android.util.Base64.encodeToString(it.notePublic + it.encryptionPublic, android.util.Base64.NO_WRAP) },
@@ -373,10 +499,8 @@ class MainActivity : ComponentActivity() {
                             activeIndex = walletManager.activeIndex,
                             onSwitch = { i -> walletManager.setActive(i); walletAddr = walletManager.address; accountEpoch++ },
                             onAdd = {
-                                kotlinx.coroutines.MainScope().launch {
-                                    withContext(Dispatchers.IO) { walletManager.addAccount() }
-                                    walletAddr = walletManager.address; accountEpoch++
-                                }
+                                withContext(Dispatchers.IO) { walletManager.addAccount() }
+                                walletAddr = walletManager.address; accountEpoch++
                             },
                             onRecovery = { screen = Screen.Recovery },
                             onBackup = { screen = Screen.Backup },

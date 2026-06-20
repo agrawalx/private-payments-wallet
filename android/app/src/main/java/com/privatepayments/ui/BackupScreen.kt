@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.umbraScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -47,7 +48,7 @@ fun BackupScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Umbra.Bg).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().umbraScreen().padding(24.dp)) {
         Spacer(Modifier.height(20.dp))
         Text("Cloud backup", color = Umbra.TextPrimary, fontFamily = Umbra.Display, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))

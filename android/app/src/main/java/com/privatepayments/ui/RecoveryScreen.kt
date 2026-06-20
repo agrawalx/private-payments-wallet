@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.umbraScreen
 
 /**
  * Phase 4 recovery-phrase screen. Two modes:
@@ -38,7 +39,7 @@ fun RecoveryScreen(
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize().background(Umbra.Bg).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().umbraScreen().padding(24.dp)) {
         Spacer(Modifier.height(20.dp))
         Text(
             if (importing) "Import recovery phrase" else "Your recovery phrase",

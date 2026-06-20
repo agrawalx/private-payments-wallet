@@ -773,6 +773,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -811,6 +813,8 @@ internal interface UniffiLib : Library {
     fun uniffi_prover_ffi_fn_func_build_deposit_params(`fixtureJson`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`commitmentTopicsB64`: RustBuffer.ByValue,`treeDepth`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_build_transfer_params(`fixtureJson`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`recipientNotePub`: RustBuffer.ByValue,`recipientEncPub`: RustBuffer.ByValue,`inputs`: RustBuffer.ByValue,`commitmentTopicsB64`: RustBuffer.ByValue,`treeDepth`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_prover_ffi_fn_func_build_unsigned_asp_register(`aspContractId`: RustBuffer.ByValue,`sourceAddress`: RustBuffer.ByValue,`accountEntryXdr`: RustBuffer.ByValue,`notePublicKeyHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_build_unsigned_transact(`poolId`: RustBuffer.ByValue,`sourceAddress`: RustBuffer.ByValue,`accountEntryXdr`: RustBuffer.ByValue,`proof`: RustBuffer.ByValue,`publicInputs`: RustBuffer.ByValue,`extDataHash`: RustBuffer.ByValue,`extRecipient`: RustBuffer.ByValue,`extAmount`: RustBuffer.ByValue,`encryptedOutput0`: RustBuffer.ByValue,`encryptedOutput1`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -986,6 +990,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_prover_ffi_checksum_func_build_transfer_params(
     ): Short
+    fun uniffi_prover_ffi_checksum_func_build_unsigned_asp_register(
+    ): Short
     fun uniffi_prover_ffi_checksum_func_build_unsigned_transact(
     ): Short
     fun uniffi_prover_ffi_checksum_func_build_withdraw_params(
@@ -1075,6 +1081,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_build_transfer_params() != 32173.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_prover_ffi_checksum_func_build_unsigned_asp_register() != 17231.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_build_unsigned_transact() != 32664.toShort()) {
@@ -2214,6 +2223,23 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
     uniffiRustCallWithError(ProverException) { _status ->
     UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_build_transfer_params(
         FfiConverterString.lower(`fixtureJson`),FfiConverterString.lower(`amount`),FfiConverterString.lower(`recipientNotePub`),FfiConverterString.lower(`recipientEncPub`),FfiConverterSequenceTypeSelectedNote.lower(`inputs`),FfiConverterSequenceString.lower(`commitmentTopicsB64`),FfiConverterUInt.lower(`treeDepth`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Build an unsigned ASP-membership `insert_leaf` tx that enrolls this account's
+         * note key — the self-serve "Register" step a wallet runs once before it can
+         * spend (deposit/send/withdraw). The leaf is `asp_membership_leaf(note_pub, 0)`,
+         * the same value `asp_membership_leaf_dec` reports and `build_asp_proofs`
+         * rebuilds against. Simulate it, then sign with `finalize_and_sign`.
+         */
+    @Throws(ProverException::class) fun `buildUnsignedAspRegister`(`aspContractId`: kotlin.String, `sourceAddress`: kotlin.String, `accountEntryXdr`: kotlin.String, `notePublicKeyHex`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(ProverException) { _status ->
+    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_build_unsigned_asp_register(
+        FfiConverterString.lower(`aspContractId`),FfiConverterString.lower(`sourceAddress`),FfiConverterString.lower(`accountEntryXdr`),FfiConverterString.lower(`notePublicKeyHex`),_status)
 }
     )
     }

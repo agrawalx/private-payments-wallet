@@ -5,23 +5,28 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** One `new_commitment_event`: topic[1] is the commitment (U256), value carries
- *  `index` + `encrypted_output`. Both base64-XDR, fed to the `scanNote` FFI. */
-data class CommitmentEvent(val commitmentTopic: String, val value: String)
+/** One `new_commitment_event`, tagged with the indexer `seq`. topic is the
+ *  commitment (U256), value carries `index` + `encrypted_output`. Both base64-XDR. */
+data class CommitmentEvent(val seq: Long, val commitmentTopic: String, val value: String)
 
-/** Live sync state pulled from the indexer's /events feed. */
-data class SyncStatus(
+/** One ASP `LeafAdded`, tagged with `seq`. value is the base64-XDR leaf. */
+data class LeafEvent(val seq: Long, val value: String)
+
+/**
+ * The **delta** of events newer than the caller's cursor. The wallet persists
+ * the cursor + accumulated events in [com.privatepayments.state.ChainStore], so
+ * each poll only transfers (and later scans) what's actually new.
+ */
+data class IndexerDelta(
     val reachable: Boolean,
-    val count: Int = 0,
-    val latestType: String? = null,
-    val latestLedger: Long? = null,
-    /** Every `new_commitment_event` (topic + value) for the wallet to scan. */
+    /** Highest `seq` seen this fetch — persist as the next cursor. */
+    val newCursor: Long,
+    /** Count of new events this fetch (for the status line). */
+    val newCount: Int = 0,
     val commitments: List<CommitmentEvent> = emptyList(),
-    /** topic[1] (base64-XDR `ScVal::U256`) of every `new_nullifier_event`. */
+    /** topic[1] (base64-XDR `ScVal::U256`) of each new `new_nullifier_event`. */
     val nullifierTopics: List<String> = emptyList(),
-    /** base64-XDR `value` of every ASP `LeafAdded` event (index order) — the
-     *  live ASP membership leaves, for rebuilding membership proofs. */
-    val leafAddedValues: List<String> = emptyList(),
+    val leaves: List<LeafEvent> = emptyList(),
     val error: String? = null,
 )
 
@@ -34,17 +39,18 @@ data class SyncStatus(
 object IndexerClient {
     private const val BASE = "http://127.0.0.1:8080"
 
-    fun fetchStatus(): SyncStatus = try {
-        // Page through the cursor-paginated feed until exhausted — a single
-        // fixed `limit` silently drops the newest events once the chain has
-        // more than one page (which is exactly when fresh deposits go missing).
+    /**
+     * Fetch every event with `seq > sinceCursor`, paging until exhausted. A
+     * single fixed `limit` would silently drop the newest events once the chain
+     * has more than one page; we page on the returned cursor instead. Starting
+     * from a persisted cursor (vs. always 0) is what makes sync incremental.
+     */
+    fun fetchSince(sinceCursor: Long): IndexerDelta = try {
         val commitments = mutableListOf<CommitmentEvent>()
         val nullifierTopics = mutableListOf<String>()
-        val leafAddedValues = mutableListOf<String>()
-        var type: String? = null
-        var ledger: Long? = null
+        val leaves = mutableListOf<LeafEvent>()
         var total = 0
-        var cursor = 0L
+        var cursor = sinceCursor
         val pageLimit = 1000 // indexer clamps to [1, 1000]
         while (true) {
             val conn = URL("$BASE/events?cursor=$cursor&limit=$pageLimit").openConnection() as HttpURLConnection
@@ -56,32 +62,29 @@ object IndexerClient {
             val n = events.length()
             for (i in 0 until n) {
                 val e = events.getJSONObject(i)
+                val seq = e.optLong("seq")
                 val topics = e.getJSONArray("topic")
-                val t = decodeSymbol(topics.optString(0))
-                type = t // events are seq-ascending, so the final one is newest
-                ledger = e.optLong("ledger")
-                when (t) {
+                when (decodeSymbol(topics.optString(0))) {
                     "new_commitment_event" ->
-                        commitments.add(CommitmentEvent(topics.optString(1), e.optString("value")))
+                        commitments.add(CommitmentEvent(seq, topics.optString(1), e.optString("value")))
                     "new_nullifier_event" ->
                         nullifierTopics.add(topics.optString(1))
                     "LeafAdded" ->
-                        leafAddedValues.add(e.optString("value"))
+                        leaves.add(LeafEvent(seq, e.optString("value")))
                 }
             }
             total += n
             val next = json.optLong("cursor", cursor)
             // Last page (short) or no forward progress → done.
-            if (n < pageLimit || next == cursor) break
+            if (n < pageLimit || next == cursor) { cursor = next; break }
             cursor = next
         }
-        SyncStatus(
-            reachable = true, count = total, latestType = type, latestLedger = ledger,
-            commitments = commitments, nullifierTopics = nullifierTopics,
-            leafAddedValues = leafAddedValues,
+        IndexerDelta(
+            reachable = true, newCursor = cursor, newCount = total,
+            commitments = commitments, nullifierTopics = nullifierTopics, leaves = leaves,
         )
     } catch (e: Exception) {
-        SyncStatus(reachable = false, error = e.message)
+        IndexerDelta(reachable = false, newCursor = sinceCursor, error = e.message)
     }
 
     /**

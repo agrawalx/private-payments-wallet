@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -21,10 +22,14 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.cardDepth
+import com.privatepayments.ui.theme.umbraScreen
+import kotlinx.coroutines.launch
 
 data class Activity(
     val icon: ImageVector,
@@ -38,7 +43,8 @@ data class Activity(
 
 @androidx.compose.runtime.Composable
 fun HomeScreen(
-    handle: String,
+    address: String,
+    accountLabel: String,
     balanceText: String,
     publicText: String,
     activity: List<Activity>,
@@ -49,13 +55,16 @@ fun HomeScreen(
     onReceive: () -> Unit,
     onSettings: () -> Unit,
     onShareProof: () -> Unit,
+    registered: Boolean = true,
+    onRegister: () -> Unit = {},
+    onFund: suspend () -> Boolean = { false },
 ) {
     var revealed by remember { mutableStateOf(false) }
 
     Column(
         Modifier
             .fillMaxSize()
-            .background(Umbra.Bg)
+            .umbraScreen()
     ) {
         Column(
             Modifier
@@ -64,12 +73,18 @@ fun HomeScreen(
                 .padding(horizontal = 20.dp)
         ) {
             Spacer(Modifier.height(16.dp))
-            TopBar(handle, onSettings)
+            TopBar(address, accountLabel, onSettings)
             Spacer(Modifier.height(14.dp))
             SyncBanner(syncStatus)
+            if (!registered) {
+                Spacer(Modifier.height(14.dp))
+                RegisterBanner(onRegister)
+            }
             Spacer(Modifier.height(14.dp))
             BalanceCard(revealed, balanceText, publicText) { revealed = !revealed }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(10.dp))
+            FundButton(onFund)
+            Spacer(Modifier.height(20.dp))
             ActionRow(onSend = onSend, onDeposit = onDeposit, onWithdraw = onWithdraw, onReceive = onReceive)
             Spacer(Modifier.height(14.dp))
             ShareProofButton(onShareProof)
@@ -97,6 +112,62 @@ private fun SyncBanner(status: String) {
 }
 
 @androidx.compose.runtime.Composable
+private fun FundButton(onFund: suspend () -> Boolean) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Umbra.Surface)
+            .border(1.dp, Umbra.Border, RoundedCornerShape(14.dp))
+            .clickable(enabled = !busy) {
+                scope.launch {
+                    busy = true
+                    val ok = runCatching { onFund() }.getOrDefault(false)
+                    busy = false
+                    android.widget.Toast.makeText(
+                        ctx,
+                        if (ok) "Requested 10,000 test XLM — balance updates shortly"
+                        else "Couldn't fund (already funded or rate-limited)",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (busy) {
+            CircularProgressIndicator(Modifier.size(16.dp), color = Umbra.Public, strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+            Text("Funding…", color = Umbra.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        } else {
+            Icon(Icons.Filled.WaterDrop, null, tint = Umbra.Public, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Fund from testnet", color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun RegisterBanner(onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(Umbra.PrimaryWash)
+            .border(1.dp, Umbra.Primary, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Shield, null, tint = Umbra.Primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Register to start sending", color = Umbra.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("One-time enrollment — needed before you deposit or send", color = Umbra.TextFaint, fontSize = 12.sp)
+        }
+        Icon(Icons.Filled.ChevronRight, null, tint = Umbra.Primary, modifier = Modifier.size(20.dp))
+    }
+}
+
+@androidx.compose.runtime.Composable
 private fun ShareProofButton(onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Umbra.Surface)
@@ -113,90 +184,103 @@ private fun ShareProofButton(onClick: () -> Unit) {
 }
 
 @androidx.compose.runtime.Composable
-private fun TopBar(handle: String, onOpenWallet: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Umbra.Primary, Umbra.PrimaryDeep))),
-            contentAlignment = Alignment.Center,
-        ) { Text("A", color = Umbra.TextPrimary, fontWeight = FontWeight.Bold) }
-        Spacer(Modifier.width(12.dp))
-        Column {
+private fun TopBar(address: String, accountLabel: String, onOpenWallet: () -> Unit) {
+    val ctx = LocalContext.current
+    val short = if (address.length > 12) "${address.take(6)}…${address.takeLast(4)}" else address
+    Column {
+        // Avatar (active account) left · network centered · settings right.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.align(Alignment.CenterStart).size(40.dp).clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Umbra.Primary, Umbra.PrimaryDeep)))
+                    .clickable { onOpenWallet() },
+                contentAlignment = Alignment.Center,
+            ) { Text(accountLabel, color = Umbra.TextPrimary, fontWeight = FontWeight.Bold) }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Lock, null, tint = Umbra.Primary, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(5.dp))
                 Text("Stellar · Testnet", color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
-            Text(handle, color = Umbra.TextFaint, fontFamily = Umbra.Mono, fontSize = 11.sp)
+
+            Box(
+                Modifier.align(Alignment.CenterEnd).size(40.dp).clip(CircleShape)
+                    .background(Umbra.Surface).clickable { onOpenWallet() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Settings, "Settings", tint = Umbra.TextMuted, modifier = Modifier.size(20.dp)) }
         }
-        Spacer(Modifier.weight(1f))
-        Icon(
-            Icons.Outlined.Settings, "Recovery phrase", tint = Umbra.TextMuted,
-            modifier = Modifier.clickable { onOpenWallet() },
-        )
+        Spacer(Modifier.height(10.dp))
+        // Copyable address chip (centered).
+        Row(
+            Modifier.fillMaxWidth().wrapContentWidth()
+                .clip(RoundedCornerShape(999.dp)).background(Umbra.Surface)
+                .clickable { copyToClipboard(ctx, "Address", address) }
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(short, color = Umbra.TextMuted, fontFamily = Umbra.Mono, fontSize = 12.sp)
+            Spacer(Modifier.width(7.dp))
+            Icon(Icons.Filled.ContentCopy, "Copy address", tint = Umbra.TextFaint, modifier = Modifier.size(13.dp))
+        }
     }
 }
 
 @androidx.compose.runtime.Composable
 private fun BalanceCard(revealed: Boolean, balanceText: String, publicText: String, onToggle: () -> Unit) {
+    // Design's bordered balance card: dark purple gradient box + hairline, a small
+    // "Shielded balance" label with an eye, a left-aligned number, and a glow that
+    // pools in the top-right corner (by the eye) and fades inward.
+    val shape = RoundedCornerShape(24.dp)
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Brush.verticalGradient(listOf(Umbra.SurfaceElevated, Umbra.Surface)))
-            .clickable { onToggle() }
+            .cardDepth(shape)
+            .clip(shape) // clips the corner glow (design: overflow hidden)
+            .background(Brush.linearGradient(listOf(Color(0xFF15131F), Color(0xFF101015))))
+            .border(1.dp, Color(0xFF2A2350), shape)
+            .clickable { onToggle() },
     ) {
-        // Purple privacy glow behind the shielded balance (design: radial wash).
+        // Corner glow anchored at the eye (top-right), fading to transparent — subtle.
         Box(
-            Modifier
-                .align(Alignment.TopStart)
-                .offset(x = (-20).dp, y = (-40).dp)
-                .size(240.dp)
-                .background(
-                    Brush.radialGradient(listOf(Umbra.Primary.copy(alpha = 0.20f), Color.Transparent)),
-                    CircleShape,
+            Modifier.align(Alignment.TopEnd).offset(x = 30.dp, y = (-38).dp).size(130.dp)
+                .background(Brush.radialGradient(listOf(Umbra.Primary.copy(alpha = 0.16f), Color.Transparent)), CircleShape),
+        )
+        Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 20.dp, bottom = 18.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Lock, null, tint = Umbra.PrimaryLight, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Shielded balance", color = Umbra.PrimaryLight, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    if (revealed) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                    null, tint = Umbra.TextFaint, modifier = Modifier.size(18.dp),
                 )
-        )
-        Column(Modifier.padding(24.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Shielded balance", color = Umbra.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                if (revealed) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                null, tint = Umbra.TextFaint, modifier = Modifier.size(16.dp),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    if (revealed) balanceText else "••••••",
+                    color = Umbra.TextPrimary, fontFamily = Umbra.Display,
+                    fontSize = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("XLM", color = Umbra.TextFaint, fontSize = 18.sp, modifier = Modifier.padding(bottom = 6.dp))
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
-                if (revealed) balanceText else "••••••",
-                color = Umbra.TextPrimary,
-                fontFamily = Umbra.Display,
-                fontSize = 44.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-1).sp,
+                if (revealed) "Tap to hide" else "Tap to reveal · hidden for privacy",
+                color = Umbra.TextFaint, fontSize = 12.5.sp,
             )
-            Spacer(Modifier.width(10.dp))
-            Text("XLM", color = Umbra.TextMuted, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            if (revealed) "Tap to hide" else "Tap to reveal · hidden for privacy",
-            color = Umbra.TextFaint, fontSize = 12.sp,
-        )
-        Spacer(Modifier.height(14.dp))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Umbra.Border))
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Public, null, tint = Umbra.Public, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Public balance", color = Umbra.TextMuted, fontSize = 12.sp)
-            Spacer(Modifier.weight(1f))
-            Text(
-                "$publicText XLM", color = Umbra.TextSecondary, fontFamily = Umbra.Display,
-                fontSize = 14.sp, fontWeight = FontWeight.Medium,
-            )
-        }
+            Spacer(Modifier.height(14.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Umbra.Border))
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Public, null, tint = Umbra.Public, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Public balance", color = Umbra.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.weight(1f))
+                Text("$publicText XLM", color = Umbra.TextSecondary, fontFamily = Umbra.Display, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }

@@ -1,0 +1,23 @@
+[package]
+name = "relayer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Privacy relayer: submits pool `transact` for withdraw/transfer under the
+# relayer's OWN account, so the spender's public account never appears as the tx
+# source / sender / fee-payer. Reuses prover-ffi's tested pure-Rust tx build+sign
+# (build_unsigned_transact / finalize_and_sign); does its own Soroban RPC.
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
+axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"
+hex = "0.4"
+prover-ffi = { path = "../prover-ffi" }

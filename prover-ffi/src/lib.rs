@@ -122,6 +122,30 @@ pub fn build_unsigned_transact(
     .map_err(ProverError::from)
 }
 
+/// Build an unsigned ASP-membership `insert_leaf` tx that enrolls this account's
+/// note key — the self-serve "Register" step a wallet runs once before it can
+/// spend (deposit/send/withdraw). The leaf is `asp_membership_leaf(note_pub, 0)`,
+/// the same value `asp_membership_leaf_dec` reports and `build_asp_proofs`
+/// rebuilds against. Simulate it, then sign with `finalize_and_sign`.
+#[uniffi::export]
+pub fn build_unsigned_asp_register(
+    asp_contract_id: String,
+    source_address: String,
+    account_entry_xdr: String,
+    note_public_key_hex: String,
+) -> Result<String, ProverError> {
+    let pkb = hex_decode(note_public_key_hex.trim_start_matches("0x")).map_err(ProverError::from)?;
+    let pk32: [u8; 32] = pkb
+        .try_into()
+        .map_err(|_| ProverError::Failed { msg: "note pub != 32 bytes".into() })?;
+    let leaf = prover::crypto::asp_membership_leaf(&types::NotePublicKey(pk32), &types::Field::ZERO)
+        .map_err(ProverError::from)?;
+    submit::build_unsigned_asp_register(
+        &asp_contract_id, &source_address, &account_entry_xdr, &leaf.to_be_bytes(),
+    )
+    .map_err(ProverError::from)
+}
+
 /// Assemble the simulated tx (fee + soroban data + auth) and sign it with the
 /// wallet key. Returns the signed envelope (base64 XDR) for `sendTransaction`.
 /// `sim_response_json` is the raw `simulateTransaction` JSON-RPC response.

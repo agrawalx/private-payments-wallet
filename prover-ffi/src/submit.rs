@@ -46,6 +46,16 @@ fn field_to_scval_u256(v: Field) -> ScVal {
     })
 }
 
+/// Encodes 32 big-endian bytes as Soroban `ScVal::U256` (for the ASP leaf).
+fn u256_scval_from_be(be: &[u8; 32]) -> ScVal {
+    ScVal::U256(UInt256Parts {
+        hi_hi: u64::from_be_bytes(be[0..8].try_into().unwrap()),
+        hi_lo: u64::from_be_bytes(be[8..16].try_into().unwrap()),
+        lo_hi: u64::from_be_bytes(be[16..24].try_into().unwrap()),
+        lo_lo: u64::from_be_bytes(be[24..32].try_into().unwrap()),
+    })
+}
+
 /// Encodes `i128` as Soroban `ScVal::I256` (two's-complement XDR layout).
 fn i128_to_i256_scval(n: i128) -> ScVal {
     let hi = if n < 0 { -1i64 } else { 0i64 };
@@ -268,6 +278,31 @@ pub fn build_unsigned_transact(
         pool,
         "transact",
         vec![proof_scval, ext_scval, sender_scval],
+    )?;
+    Ok(raw.to_xdr_base64(Limits::none())?)
+}
+
+/// Build an unsigned `insert_leaf(leaf)` invoke against the ASP membership
+/// contract — the wallet's self-serve "Register" enrollment. The contract must
+/// be in permissionless mode (`set_admin_insert_only(false)`); then no auth
+/// entry is needed and the tx source just pays the fee. Sign with
+/// `finalize_and_sign` after simulating, exactly like `transact`.
+pub fn build_unsigned_asp_register(
+    asp: &str,
+    source_g: &str,
+    account_entry_xdr: &str,
+    leaf_be: &[u8; 32],
+) -> Result<String> {
+    let next_seq = seq_from_account_entry(account_entry_xdr)?
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("account sequence overflow"))?;
+    let raw = build_invoke_contract_tx_envelope(
+        source_g,
+        SequenceNumber(next_seq),
+        BASE_FEE,
+        asp,
+        "insert_leaf",
+        vec![u256_scval_from_be(leaf_be)],
     )?;
     Ok(raw.to_xdr_base64(Limits::none())?)
 }

@@ -24,6 +24,7 @@ object Umbra {
     val PrimaryDeep = Color(0xFF5B3DF0)
     val PrimaryLight = Color(0xFFB9A4FF)
     val PrimaryWash = Color(0x1F8B6DFF)   // rgba(139,109,255,.12) chip/wash
+    val PrimaryBorder = Color(0xFF3A2F6E) // hairline on purple washes/pills
 
     // Public = amber + globe (deposits — reveals address + amount on-chain)
     val Public = Color(0xFFF5A623)

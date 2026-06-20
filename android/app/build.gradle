@@ -19,7 +19,10 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled false   // keep R8 off — JNA/UniFFI use reflection + native
+            // Signed with the debug key so the release APK is installable for
+            // sideloading/sharing (not Play Store). Swap in a real keystore later.
+            signingConfig signingConfigs.debug
         }
     }
 

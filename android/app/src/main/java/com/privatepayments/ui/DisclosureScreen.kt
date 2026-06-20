@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.ui.platform.LocalContext
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.umbraScreen
 import kotlinx.coroutines.launch
 
 /** The disclosure result surfaced to the UI (FFI types stay out of Compose). */
@@ -74,7 +75,7 @@ fun DisclosureScreen(
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    Column(Modifier.fillMaxSize().background(Umbra.Bg).verticalScroll(rememberScrollState()).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().umbraScreen().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Shield, null, tint = Umbra.Primary, modifier = Modifier.size(22.dp))

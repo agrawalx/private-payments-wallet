@@ -24,7 +24,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.privatepayments.ui.theme.ProofOrb
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.umbraScreen
 
 private enum class StepState { Done, Active, Pending }
 
@@ -75,7 +77,7 @@ fun ProofScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().background(Umbra.Bg).padding(24.dp),
+        Modifier.fillMaxSize().umbraScreen().padding(24.dp),
     ) {
         Spacer(Modifier.height(24.dp))
         Text(title, color = Umbra.TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -91,7 +93,13 @@ fun ProofScreen(
         }
 
         Spacer(Modifier.height(36.dp))
-        ProofOrb(active = error == null && current < 4, accent = accent, isPublic = isPublic)
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            ProofOrb(
+                icon = if (isPublic) Icons.Filled.Public else Icons.Filled.Shield,
+                accent = accent,
+                spin = error == null && current < 4,
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Text(
@@ -126,33 +134,6 @@ fun ProofScreen(
                 .padding(vertical = 16.dp),
             contentAlignment = Alignment.Center,
         ) { Text(if (error != null) "Close" else "Cancel", color = Umbra.TextSecondary, fontWeight = FontWeight.Medium) }
-    }
-}
-
-@Composable
-private fun ProofOrb(active: Boolean, accent: androidx.compose.ui.graphics.Color, isPublic: Boolean) {
-    val transition = rememberInfiniteTransition(label = "orb")
-    val scale by transition.animateFloat(
-        initialValue = 1f, targetValue = if (active) 1.06f else 1f,
-        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "scale",
-    )
-    val deep = if (isPublic) Umbra.Public.copy(alpha = 0.65f) else Umbra.PrimaryDeep
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        // Soft glow ring.
-        Box(
-            Modifier.size(150.dp).scale(scale).clip(CircleShape)
-                .background(Brush.radialGradient(listOf(accent.copy(alpha = 0.20f), Umbra.Bg))),
-        )
-        Box(
-            Modifier.size(110.dp).scale(scale).clip(CircleShape)
-                .background(Brush.radialGradient(listOf(accent, deep))),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (isPublic) Icons.Filled.Public else Icons.Filled.Shield,
-                null, tint = Umbra.TextPrimary, modifier = Modifier.size(40.dp),
-            )
-        }
     }
 }
 

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.umbraScreen
 
 /**
  * Amount (+ optional recipient) entry for deposit / send / withdraw. Enforces the
@@ -38,6 +39,8 @@ fun AmountScreen(
     /** If non-null, show a recipient field with this label + hint. */
     recipientLabel: String?,
     recipientHint: String,
+    /** True if a blank recipient is valid (transfer → re-shield to self). */
+    recipientOptional: Boolean = false,
     onConfirm: (amountStroops: Long, recipient: String) -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -47,10 +50,10 @@ fun AmountScreen(
 
     val stroops: Long? = amount.toDoubleOrNull()?.let { (it * 1e7).toLong() }?.takeIf { it > 0 }
     val overCap = maxStroops != null && stroops != null && stroops > maxStroops
-    val recipientOk = recipientLabel == null || recipient.isNotBlank()
+    val recipientOk = recipientLabel == null || recipientOptional || recipient.isNotBlank()
     val canContinue = stroops != null && !overCap && recipientOk
 
-    Column(Modifier.fillMaxSize().background(Umbra.Bg).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().umbraScreen().padding(24.dp)) {
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(if (isPublic) Icons.Filled.Public else Icons.Filled.Lock, null, tint = accent, modifier = Modifier.size(20.dp))
