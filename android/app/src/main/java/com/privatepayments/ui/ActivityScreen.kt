@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.sp
 import com.privatepayments.ui.theme.Umbra
 import com.privatepayments.ui.theme.WalletMode
 import com.privatepayments.ui.theme.umbraScreen
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
  * The Activity tab — the full history behind Home's short "Recent activity"
@@ -57,11 +59,35 @@ fun ActivityScreen(
                     color = Umbra.TextFaint, fontSize = 13.sp,
                     modifier = Modifier.padding(vertical = 10.dp),
                 )
+            } else if (isPublic) {
+                // Public rows carry a real "YYYY-MM-DD" date — group under
+                // day headers. Shielded notes only have a leaf index (no
+                // wall-clock time is ever derived from chain data), so they
+                // stay a flat, leaf-ordered list below.
+                shown.groupBy { it.time }.forEach { (date, rows) ->
+                    Text(
+                        dayLabel(date), color = Umbra.TextFaint, fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
+                    )
+                    rows.forEach { ActivityRow(it); Spacer(Modifier.height(6.dp)) }
+                }
             } else {
                 shown.forEach { ActivityRow(it); Spacer(Modifier.height(6.dp)) }
             }
             Spacer(Modifier.height(24.dp))
         }
         BottomNav(HomeTab.Activity, onSelectTab, onSettings)
+    }
+}
+
+/** "YYYY-MM-DD" → "Today" / "Yesterday" / "Mon, Jan 5". Falls back to the raw string. */
+private fun dayLabel(iso: String): String {
+    val date = runCatching { LocalDate.parse(iso) }.getOrNull() ?: return iso
+    val today = LocalDate.now()
+    return when (date) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> date.format(DateTimeFormatter.ofPattern("EEE, MMM d"))
     }
 }

@@ -2,7 +2,10 @@ package com.privatepayments.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,11 +44,16 @@ fun AmountScreen(
     recipientHint: String,
     /** True if a blank recipient is valid (transfer → re-shield to self). */
     recipientOptional: Boolean = false,
+    /** Prefills the recipient field — e.g. a tapped contact's address. */
+    initialRecipient: String = "",
+    /** Your other wallet accounts (label to address) — quick-pick chips so
+     *  moving funds between your own accounts never needs a manual copy/paste. */
+    myAddresses: List<Pair<String, String>> = emptyList(),
     onConfirm: (amountStroops: Long, recipient: String) -> Unit,
     onCancel: () -> Unit,
 ) {
     var amount by remember { mutableStateOf("") }
-    var recipient by remember { mutableStateOf("") }
+    var recipient by remember { mutableStateOf(initialRecipient) }
     val accent = if (isPublic) Umbra.Public else Umbra.Primary
 
     val stroops: Long? = amount.toDoubleOrNull()?.let { (it * 1e7).toLong() }?.takeIf { it > 0 }
@@ -108,6 +116,33 @@ fun AmountScreen(
                         inner()
                     },
                 )
+            }
+            if (myAddresses.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text("Your other addresses", color = Umbra.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    myAddresses.forEach { (label, addr) ->
+                        Row(
+                            Modifier.clip(RoundedCornerShape(10.dp)).background(Umbra.Surface)
+                                .clickable { recipient = addr }.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                Modifier.size(18.dp).clip(CircleShape).background(accent.copy(alpha = 0.18f)),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(label, color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (addr.length > 12) "${addr.take(5)}…${addr.takeLast(4)}" else addr,
+                                color = Umbra.TextSecondary, fontFamily = Umbra.Mono, fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
             }
         }
 

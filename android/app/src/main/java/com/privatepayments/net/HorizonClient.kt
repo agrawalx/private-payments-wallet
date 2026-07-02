@@ -59,6 +59,7 @@ object HorizonClient {
         /** The other party's G-address (short-form handled by the UI). */
         val counterparty: String,
         val createdAt: String,
+        val txHash: String,
     )
 
     /**
@@ -91,7 +92,7 @@ object HorizonClient {
                     val to = r.optString("to")
                     val sent = from == account
                     val amt = fmtAmount(r.optString("amount"), sent)
-                    out.add(PublicPayment(sent, amt, if (sent) to else from, r.optString("created_at")))
+                    out.add(PublicPayment(sent, amt, if (sent) to else from, r.optString("created_at"), r.optString("transaction_hash")))
                 }
                 "create_account" -> {
                     // The account being created received `starting_balance`.
@@ -99,7 +100,7 @@ object HorizonClient {
                     val sent = created != account // if we funded someone else
                     val amt = fmtAmount(r.optString("starting_balance"), sent)
                     val other = if (sent) created else r.optString("funder")
-                    out.add(PublicPayment(sent, amt, other, r.optString("created_at")))
+                    out.add(PublicPayment(sent, amt, other, r.optString("created_at"), r.optString("transaction_hash")))
                 }
             }
         }

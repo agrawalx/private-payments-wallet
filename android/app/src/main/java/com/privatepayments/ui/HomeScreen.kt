@@ -42,6 +42,8 @@ data class Activity(
     val positive: Boolean,
     val time: String,
     val subtitle: String? = null,
+    /** stellar.expert link for this tx, if known (public activity only). */
+    val url: String? = null,
 )
 
 /** The three bottom-nav destinations that live "inside" Home (Settings is a
@@ -424,8 +426,11 @@ private fun ActivityHeader(onSeeAll: () -> Unit) {
 
 @androidx.compose.runtime.Composable
 internal fun ActivityRow(a: Activity) {
+    val ctx = LocalContext.current
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.Surface).padding(14.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.Surface)
+            .then(if (a.url != null) Modifier.clickable { openUrl(ctx, a.url) } else Modifier)
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -458,6 +463,10 @@ internal fun ActivityRow(a: Activity) {
                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(a.time, color = Umbra.TextFaint, fontSize = 11.sp)
+        }
+        if (a.url != null) {
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Filled.OpenInNew, "View on stellar.expert", tint = Umbra.TextFaint, modifier = Modifier.size(13.dp))
         }
     }
 }

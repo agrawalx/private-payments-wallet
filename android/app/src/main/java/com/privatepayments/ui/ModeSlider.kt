@@ -79,7 +79,6 @@ fun ModeSlider(mode: WalletMode, onChange: (WalletMode, Offset) -> Unit, modifie
             .border(1.dp, Umbra.Border, shape)
             .pointerInput(isPublic) {
                 detectHorizontalDragGestures { _, dragAmount ->
-                    android.util.Log.d("ModeSlider", "drag dragAmount=$dragAmount isPublic=$isPublic")
                     if (dragAmount > 8f && !isPublic) onChange(WalletMode.Public, anchorFor(true))
                     else if (dragAmount < -8f && isPublic) onChange(WalletMode.Shielded, anchorFor(false))
                 }
@@ -98,14 +97,8 @@ fun ModeSlider(mode: WalletMode, onChange: (WalletMode, Offset) -> Unit, modifie
                 .background(Umbra.Primary),
         )
         Row(Modifier.fillMaxSize()) {
-            Segment("Public", Icons.Filled.WbSunny, isPublic, Modifier.weight(1f)) {
-                android.util.Log.d("ModeSlider", "tap Public segment isPublic=$isPublic")
-                onChange(WalletMode.Public, anchorFor(true))
-            }
-            Segment("Shielded", Icons.Filled.Lock, !isPublic, Modifier.weight(1f)) {
-                android.util.Log.d("ModeSlider", "tap Shielded segment isPublic=$isPublic")
-                onChange(WalletMode.Shielded, anchorFor(false))
-            }
+            Segment("Public", Icons.Filled.WbSunny, isPublic, Modifier.weight(1f)) { onChange(WalletMode.Public, anchorFor(true)) }
+            Segment("Shielded", Icons.Filled.Lock, !isPublic, Modifier.weight(1f)) { onChange(WalletMode.Shielded, anchorFor(false)) }
         }
     }
 }

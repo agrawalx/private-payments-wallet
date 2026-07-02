@@ -200,7 +200,6 @@ class MainActivity : ComponentActivity() {
             val revealScope = rememberCoroutineScope()
 
             fun triggerModeChange(newMode: WalletMode, anchorWindow: Offset) {
-                android.util.Log.d("ModeReveal", "triggerModeChange newMode=$newMode walletMode=$walletMode revealFrom=$revealFrom")
                 if (newMode == walletMode) return
                 val from = walletMode
                 val center = anchorWindow - rootOrigin
@@ -219,7 +218,6 @@ class MainActivity : ComponentActivity() {
                     revealRadius.snapTo(0f)
                     revealRadius.animateTo(revealMax, tween(520, easing = FastOutSlowInEasing))
                     revealFrom = null
-                    android.util.Log.d("ModeReveal", "reveal done, revealFrom cleared")
                 }
             }
 
@@ -234,6 +232,13 @@ class MainActivity : ComponentActivity() {
                     var txHash by remember { mutableStateOf("") }
                     var pendingAmount by remember { mutableStateOf(0L) }
                     var pendingRecipient by remember { mutableStateOf("") }
+                    // Set right before navigating to a Send screen from a tapped
+                    // contact (Track D) — prefills AmountScreen's recipient field.
+                    var prefillRecipient by remember { mutableStateOf("") }
+                    // Local address book (Track D). Bumped on add/remove to re-read.
+                    val contactStore = remember { com.privatepayments.state.ContactStore(ctx) }
+                    var contactsEpoch by remember { mutableStateOf(0) }
+                    val contacts = remember(contactsEpoch) { contactStore.list() }
                     // Success-screen verb override (e.g. a classic public send → "Sent");
                     // null falls back to the pool op's verb.
                     var sentVerb by remember { mutableStateOf<String?>(null) }
@@ -445,6 +450,8 @@ class MainActivity : ComponentActivity() {
                                     time = p.createdAt.take(10),
                                     subtitle = (if (p.sent) "To " else "From ") +
                                         if (p.counterparty.length > 12) "${p.counterparty.take(6)}…${p.counterparty.takeLast(4)}" else p.counterparty,
+                                    url = p.txHash.takeIf { it.isNotEmpty() }
+                                        ?.let { "https://stellar.expert/explorer/testnet/tx/$it" },
                                 )
                             }
                         }
@@ -452,12 +459,31 @@ class MainActivity : ComponentActivity() {
 
                     // Avatar = the active account as a letter (A = account 0, B = 1, …).
                     val accountLabel = remember(accountEpoch) { ('A' + walletManager.activeIndex.coerceIn(0, 25)).toString() }
+                    // Your OTHER accounts' public addresses (label to address) — quick-pick
+                    // chips on the public Send screen so moving XLM between your own
+                    // accounts never needs a manual copy/paste (MetaMask-style).
+                    val myOtherAddresses = remember(accountEpoch) {
+                        walletManager.accounts()
+                            .filter { it.index != walletManager.activeIndex }
+                            .map { ('A' + it.index.coerceIn(0, 25)).toString() to it.address }
+                    }
                     // Spending requires ASP enrollment — route unregistered accounts
                     // through Register first (receiving needs no enrollment).
                     val start: (Op) -> Unit = { chosen ->
-                        if (walletAddr != null) { op = chosen; screen = if (isRegistered) Screen.Amount else Screen.Register }
+                        if (walletAddr != null) { op = chosen; prefillRecipient = ""; screen = if (isRegistered) Screen.Amount else Screen.Register }
                     }
                     val amountXlm = "%.4f".format(pendingAmount / 1e7)
+
+                    // Tapping a contact's "Send public"/"Send shielded" chip (Track D):
+                    // prefill the recipient and route into the same Send flows as the
+                    // normal Home buttons.
+                    val sendToContact: (String, Boolean) -> Unit = { recipientAddr, viaPublic ->
+                        if (walletAddr != null) {
+                            prefillRecipient = recipientAddr
+                            if (viaPublic) screen = Screen.PublicSend
+                            else { op = Op.Transfer; screen = if (isRegistered) Screen.Amount else Screen.Register }
+                        }
+                    }
 
                     // Renders the Home/Activity/People tab family for an EXPLICIT
                     // mode (not necessarily the live `walletMode`) — this lets the
@@ -485,7 +511,7 @@ class MainActivity : ComponentActivity() {
                                 onFund = { withContext(Dispatchers.IO) { walletManager.fundFromTestnet() } },
                                 mode = mode,
                                 onModeChange = onModeChangeRequest,
-                                onPublicSend = { if (walletAddr != null) screen = Screen.PublicSend },
+                                onPublicSend = { if (walletAddr != null) { prefillRecipient = ""; screen = Screen.PublicSend } },
                                 publicActivity = publicActivity,
                                 onSelectTab = { homeTab = it },
                             )
@@ -503,6 +529,14 @@ class MainActivity : ComponentActivity() {
                                 address = topAddress,
                                 accountLabel = accountLabel,
                                 mode = mode,
+                                contacts = contacts,
+                                onAddContact = { name, pub, shielded ->
+                                    contactStore.add(name, pub, shielded)
+                                    contactsEpoch++
+                                },
+                                onRemoveContact = { id -> contactStore.remove(id); contactsEpoch++ },
+                                onSendToPublic = { addr -> sendToContact(addr, true) },
+                                onSendToShielded = { addr -> sendToContact(addr, false) },
                                 onSettings = { screen = Screen.Settings },
                                 onSelectTab = { homeTab = it },
                             )
@@ -546,6 +580,8 @@ class MainActivity : ComponentActivity() {
                             maxStroops = (wallet.publicStroops ?: 0L).minus(15_000_000L).coerceAtLeast(0L),
                             recipientLabel = "Recipient address (G…)",
                             recipientHint = "G… public Stellar address",
+                            initialRecipient = prefillRecipient,
+                            myAddresses = myOtherAddresses,
                             onConfirm = { amt, recip -> pendingAmount = amt; pendingRecipient = recip; screen = Screen.PublicConfirm },
                             onCancel = { screen = Screen.Home },
                         )
@@ -577,6 +613,7 @@ class MainActivity : ComponentActivity() {
                             recipientLabel = op.recipientLabel,
                             recipientHint = op.recipientHint,
                             recipientOptional = op.recipientOptional,
+                            initialRecipient = prefillRecipient,
                             onConfirm = { amt, recip -> pendingAmount = amt; pendingRecipient = recip; screen = Screen.Confirm },
                             onCancel = { screen = Screen.Home },
                         )
