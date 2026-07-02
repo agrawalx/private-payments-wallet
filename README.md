@@ -3,7 +3,31 @@
 A self-custodial Android wallet for **shielded payments** on the Stellar testnet, built on
 Nethermind's privacy-pool Soroban contracts + Circom circuits, with **zero-knowledge proofs
 generated on-device**. Deposit publicly into a pool, then send/withdraw privately — amounts and
-links are hidden by a Groth16 proof the phone produces itself.
+links are hidden by a Groth16 proof the phone produces itself. A second, fully classic "Daylight"
+mode sits right alongside it for plain public XLM.
+
+<p align="center">
+  <img src="docs/screenshots/home-shielded.png" width="230" alt="Shielded home — balance revealed" />
+  <img src="docs/screenshots/home-public.png" width="230" alt="Public home with activity" />
+## Highlights
+
+- **On-device Groth16 proving.** No server ever sees your keys, amounts, or recipients — the
+  phone builds and proves the transaction itself (`prover-ffi/`, Rust compiled to a native `.so`).
+- **Two faces, one wallet.** A tap-or-swipe slider flips between **☀ Public** (plain Stellar XLM)
+  and **🔒 Shielded** (the privacy pool), each with its own palette and a circular-reveal
+  transition anchored to the thumb.
+- **Full activity history**, mode-aware and grouped by day for public payments, with a tap-through
+  to [stellar.expert](https://stellar.expert) on any transaction.
+- **A local address book.** Save a name against a public `G…` address and/or a shielded `stella:`
+  address, then send to it directly — no more re-copying addresses out of a block explorer.
+- **MetaMask-style "your other addresses."** Moving XLM between your own accounts shows them as
+  one-tap chips right on the Send screen (see below) instead of a manual copy-paste round trip.
+- **Multi-account, BIP39/SEP-5.** One recovery phrase, unlimited accounts, each with its own
+  shielded keys and note store — plus encrypted Google Drive backup of your note history.
+
+<p align="center">
+  <img src="docs/screenshots/send-quickpick.png" width="260" alt="Send screen showing quick-pick chips for your other accounts" />
+</p>
 
 ```
 Phone (Kotlin UI + Rust prover via UniFFI)
@@ -18,6 +42,9 @@ On-chain: Pool · Groth16 verifier · ASP (membership + non-membership)
 The wallet needs **two** backends: the public **Soroban RPC** (no setup) and an **indexer**
 (you run it, or host one). The relayer is **off** by default — transactions self-submit and pay
 their own gas, so no relayer server is required.
+
+For a deep dive into the cryptography, contracts, and full request traces, see
+**[walkthrough.md](walkthrough.md)**.
 
 ---
 
@@ -138,6 +165,19 @@ hosted indexer the app needs no local services at all.
    enrollment; the app prompts via the **Register** screen. Receiving needs no enrollment.
 4. **Deposit** (public) → **Send / Withdraw** (private). Each spend builds a ZK proof on-device
    (~7 s) — that's the "proof moment" screen.
+5. **Switch faces any time** — tap or swipe the Public/Shielded slider on Home. Each mode keeps its
+   own activity feed and balance card.
+6. **Save contacts** on the People tab, then send straight to them from a chip — no address
+   copy-pasting, on either rail.
+
+## App structure
+
+| Tab | What it shows |
+|---|---|
+| **Home** | The active mode's balance card, primary actions (Deposit/Send/Receive/Withdraw for Shielded; Send/Receive for Public), and a short activity preview. |
+| **Activity** | The full history for the active mode — public payments grouped by day with a tap-through to stellar.expert; shielded notes in leaf order (deposits, receives, sends). |
+| **People** | A local, on-device address book. Save a name against a public and/or shielded address; tap a contact to jump straight into Send with the recipient prefilled. |
+| **Settings** | Account switcher, recovery phrase, and encrypted Google Drive backup. |
 
 ## Deployed testnet contracts
 

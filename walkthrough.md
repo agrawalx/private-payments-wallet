@@ -221,7 +221,8 @@ is called from Kotlin as `provePolicyTx22Json`; `build_unsigned_transact` → `b
 - *Assemble + prove:* `assembleDeposit` / `assembleWithdraw` / `assembleTransfer`,
   `provePolicyTx22Json`.
 - *Transaction:* `accountLedgerKey`, `buildUnsignedTransact`, `finalizeAndSign`,
-  `accountBalanceStroops`.
+  `accountBalanceStroops`, `buildSignedPayment` (classic native-XLM payment for Daylight/public
+  mode — built + signed in one call, submitted via Horizon instead of the Soroban RPC path above).
 - *Scanning:* `scanNote`, `decodeNullifierTopic`, `decodeAspLeaf`, `currentPoolRoot`.
 - *Disclosure:* `issueDisclosureReceipt`, `verifyDisclosureReceipt`.
 
