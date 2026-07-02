@@ -18,10 +18,10 @@ use anyhow::{anyhow, Result};
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use stellar_xdr::curr::{
-    self as xdr, AccountId, DecoratedSignature, Hash, Int256Parts, InvokeContractArgs,
+    self as xdr, AccountId, Asset, DecoratedSignature, Hash, Int256Parts, InvokeContractArgs,
     InvokeHostFunctionOp, LedgerEntryData, LedgerKey, LedgerKeyAccount, Limits, Memo, MuxedAccount,
-    Operation, OperationBody, Preconditions, PublicKey as XdrPublicKey, ReadXdr, ScAddress, ScMap,
-    ScMapEntry, ScSymbol, ScVal, ScVec, SequenceNumber, Signature, SignatureHint,
+    Operation, OperationBody, PaymentOp, Preconditions, PublicKey as XdrPublicKey, ReadXdr,
+    ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, ScVec, SequenceNumber, Signature, SignatureHint,
     SorobanAuthorizationEntry, SorobanTransactionData, Transaction, TransactionEnvelope,
     TransactionExt, TransactionSignaturePayload,
     TransactionSignaturePayloadTaggedTransaction as Tagged, TransactionV1Envelope, UInt256Parts,
@@ -305,6 +305,55 @@ pub fn build_unsigned_asp_register(
         vec![u256_scval_from_be(leaf_be)],
     )?;
     Ok(raw.to_xdr_base64(Limits::none())?)
+}
+
+/// Build + sign a **classic native-XLM payment** (Daylight / public mode).
+///
+/// Classic payments need no Soroban simulation, data, or auth — so this builds
+/// the `Payment` op, signs with the wallet key, and returns the signed base64
+/// envelope in one shot. Submit it via **Horizon** `POST /transactions`
+/// (Soroban RPC's `sendTransaction` rejects non-Soroban txs), not the RPC path
+/// used by `transact`. `memo_text` empty = no memo. `account_entry_xdr` is the
+/// base64 `LedgerEntryData::Account` from getLedgerEntries (for the seq number).
+pub fn build_signed_payment(
+    source_g: &str,
+    account_entry_xdr: &str,
+    dest_g: &str,
+    amount_stroops: i64,
+    memo_text: &str,
+    secret: &[u8; 32],
+) -> Result<String> {
+    if amount_stroops <= 0 {
+        return Err(anyhow!("payment amount must be positive"));
+    }
+    let next_seq = seq_from_account_entry(account_entry_xdr)?
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("account sequence overflow"))?;
+    let memo = if memo_text.is_empty() {
+        Memo::None
+    } else {
+        Memo::Text(memo_text.as_bytes().to_vec().try_into().map_err(|_| anyhow!("memo > 28 bytes"))?)
+    };
+    let op = Operation {
+        source_account: None,
+        body: OperationBody::Payment(PaymentOp {
+            destination: muxed_account_from_g(dest_g)?,
+            asset: Asset::Native,
+            amount: amount_stroops,
+        }),
+    };
+    let tx = Transaction {
+        source_account: muxed_account_from_g(source_g)?,
+        fee: BASE_FEE,
+        seq_num: SequenceNumber(next_seq),
+        cond: Preconditions::None,
+        memo,
+        operations: VecM::try_from(vec![op])?,
+        ext: TransactionExt::V0,
+    };
+    let env = TransactionEnvelope::Tx(TransactionV1Envelope { tx, signatures: VecM::default() });
+    let signed = sign_envelope(env, secret)?;
+    Ok(signed.to_xdr_base64(Limits::none())?)
 }
 
 /// Merges simulation resource fee + soroban data + auth into the unsigned tx,

@@ -163,6 +163,31 @@ pub fn finalize_and_sign(
     submit::finalize_and_sign(&unsigned_xdr, &sim_response_json, &secret).map_err(ProverError::from)
 }
 
+/// Build + sign a **classic native-XLM payment** (Daylight / public mode) in one
+/// call. Returns the signed base64 envelope — submit it via **Horizon**
+/// `POST /transactions` (not Soroban RPC). `memo` empty = no memo.
+/// `account_entry_xdr` is the base64 `LedgerEntryData::Account` from
+/// getLedgerEntries; the tx uses `seq + 1`.
+#[uniffi::export]
+pub fn build_signed_payment(
+    source_address: String,
+    account_entry_xdr: String,
+    dest_address: String,
+    amount_stroops: i64,
+    memo: String,
+    source_secret: Vec<u8>,
+) -> Result<String, ProverError> {
+    if source_secret.len() != 32 {
+        return Err(ProverError::Failed { msg: "secret must be 32 bytes".into() });
+    }
+    let mut secret = [0u8; 32];
+    secret.copy_from_slice(&source_secret);
+    submit::build_signed_payment(
+        &source_address, &account_entry_xdr, &dest_address, amount_stroops, &memo, &secret,
+    )
+    .map_err(ProverError::from)
+}
+
 /// Error surfaced across the FFI boundary to Kotlin/Swift.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ProverError {

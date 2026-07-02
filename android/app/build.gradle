@@ -67,6 +67,8 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
     // Keystore-backed encrypted storage for the wallet seed/secret.
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    // QR codes for the Receive screen (encode the active address).
+    implementation 'com.google.zxing:core:3.5.3'
     // Phase 7 backup: Google Sign-In to authorize Drive appDataFolder access.
     // We get an OAuth token for the drive.appdata scope and call the Drive REST
     // API over raw HTTP (no heavy google-api-services-drive client).

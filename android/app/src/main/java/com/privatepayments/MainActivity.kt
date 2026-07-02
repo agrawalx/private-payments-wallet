@@ -10,10 +10,29 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.NorthEast
+import androidx.compose.material.icons.filled.SouthWest
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,6 +45,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.ApiException
 import com.privatepayments.net.DriveBackup
+import com.privatepayments.net.HorizonClient
 import com.privatepayments.net.IndexerClient
 import com.privatepayments.net.InsecureTls
 import com.privatepayments.net.RelayerClient
@@ -34,11 +54,14 @@ import com.privatepayments.state.ChainStore
 import com.privatepayments.state.CoinSelector
 import com.privatepayments.state.NoteStore
 import com.privatepayments.state.WalletBackup
+import com.privatepayments.ui.ActivityScreen
 import com.privatepayments.ui.AmountScreen
 import com.privatepayments.ui.BackupScreen
 import com.privatepayments.ui.DisclosureResult
 import com.privatepayments.ui.DisclosureScreen
 import com.privatepayments.ui.HomeScreen
+import com.privatepayments.ui.HomeTab
+import com.privatepayments.ui.PeopleScreen
 import com.privatepayments.ui.ProofScreen
 import com.privatepayments.ui.ReceiveScreen
 import com.privatepayments.ui.ConfirmScreen
@@ -63,8 +86,12 @@ import uniffi.prover_ffi.buildUnsignedAspRegister
 import uniffi.prover_ffi.decodeAspLeaf
 import uniffi.prover_ffi.notePublicKey
 import com.privatepayments.ui.WalletState
+import com.privatepayments.ui.theme.LocalUmbraColors
 import com.privatepayments.ui.theme.Umbra
 import com.privatepayments.ui.theme.UmbraTheme
+import com.privatepayments.ui.theme.WalletMode
+import com.privatepayments.ui.theme.paletteFor
+import kotlin.math.hypot
 import com.privatepayments.wallet.WalletManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -76,6 +103,7 @@ import uniffi.prover_ffi.accountLedgerKey
 import uniffi.prover_ffi.assembleDeposit
 import uniffi.prover_ffi.assembleTransfer
 import uniffi.prover_ffi.assembleWithdraw
+import uniffi.prover_ffi.buildSignedPayment
 import uniffi.prover_ffi.buildUnsignedTransact
 import uniffi.prover_ffi.decodeNullifierTopic
 import uniffi.prover_ffi.currentPoolRoot
@@ -98,7 +126,7 @@ private const val RPC_URL = "https://soroban-testnet.stellar.org"
 // (pays its own gas) — no relayer server needed. Deposit always self-submits.
 private const val USE_RELAYER = false
 
-private enum class Screen { Splash, Onboarding, Home, Amount, Confirm, Proof, Success, Recovery, Disclosure, Backup, Settings, Receive, Register }
+private enum class Screen { Splash, Onboarding, Home, Amount, Confirm, Proof, Success, Recovery, Disclosure, Backup, Settings, Receive, Register, PublicSend, PublicConfirm, PublicSending }
 
 /**
  * A shielded primitive the app can run on-device. The amount (and recipient,
@@ -140,15 +168,77 @@ class MainActivity : ComponentActivity() {
         val walletManager = WalletManager(this)
 
         setContent {
-            UmbraTheme {
+            // Which face of the wallet is showing (Daylight/public vs Umbra/shielded).
+            // Drives the whole palette; toggled by the slider on Home.
+            var publicMode by rememberSaveable { mutableStateOf(false) }
+            val walletMode = if (publicMode) WalletMode.Public else WalletMode.Shielded
+
+            // --- Mode switch: circular reveal (Track A) -------------------------
+            // HomeScreen/ActivityScreen/PeopleScreen are pure presentational
+            // composables (no side effects of their own), so the transition
+            // renders the OLD palette a second time — clipped to everywhere
+            // *except* a circle growing from the tapped thumb — on top of the
+            // NEW palette underneath (which is live from frame 1, no per-token
+            // color tween). That gives a pixel-perfect wipe with zero muddy
+            // in-between colors and no whole-tree recomposition storm.
+            //
+            // Deliberately declared HERE, above UmbraTheme(walletMode) — not
+            // inside it — because triggering a switch changes `walletMode`,
+            // which recomposes UmbraTheme's subtree; state remembered *inside*
+            // that subtree (including the reveal's own CoroutineScope) could be
+            // torn down mid-animation, permanently stranding the invisible
+            // overlay (Modifier.clip only affects drawing, not hit-testing, so
+            // a stuck overlay silently eats every future tap). Hoisting this
+            // state above the thing it's animating means it can't be affected
+            // by the switch it's driving.
+            var revealFrom by remember { mutableStateOf<WalletMode?>(null) }
+            var revealCenter by remember { mutableStateOf(Offset.Zero) }
+            val revealRadius = remember { Animatable(0f) }
+            var revealMax by remember { mutableStateOf(1f) }
+            var rootOrigin by remember { mutableStateOf(Offset.Zero) }
+            var rootSize by remember { mutableStateOf(IntSize.Zero) }
+            val revealScope = rememberCoroutineScope()
+
+            fun triggerModeChange(newMode: WalletMode, anchorWindow: Offset) {
+                android.util.Log.d("ModeReveal", "triggerModeChange newMode=$newMode walletMode=$walletMode revealFrom=$revealFrom")
+                if (newMode == walletMode) return
+                val from = walletMode
+                val center = anchorWindow - rootOrigin
+                val w = rootSize.width.toFloat()
+                val h = rootSize.height.toFloat()
+                revealCenter = center
+                revealMax = maxOf(
+                    hypot(center.x, center.y),
+                    hypot(w - center.x, center.y),
+                    hypot(center.x, h - center.y),
+                    hypot(w - center.x, h - center.y),
+                ).takeIf { it > 0f } ?: 2000f
+                revealFrom = from
+                publicMode = newMode == WalletMode.Public
+                revealScope.launch {
+                    revealRadius.snapTo(0f)
+                    revealRadius.animateTo(revealMax, tween(520, easing = FastOutSlowInEasing))
+                    revealFrom = null
+                    android.util.Log.d("ModeReveal", "reveal done, revealFrom cleared")
+                }
+            }
+
+            UmbraTheme(walletMode) {
                 Surface(color = Umbra.Bg) {
                     val ctx = this@MainActivity
                     val wallet = remember { WalletState() }
                     var screen by remember { mutableStateOf(Screen.Splash) }
+                    // Which bottom-nav destination is showing while screen == Home.
+                    var homeTab by rememberSaveable { mutableStateOf(HomeTab.Home) }
                     var op by remember { mutableStateOf(Op.Deposit) }
                     var txHash by remember { mutableStateOf("") }
                     var pendingAmount by remember { mutableStateOf(0L) }
                     var pendingRecipient by remember { mutableStateOf("") }
+                    // Success-screen verb override (e.g. a classic public send → "Sent");
+                    // null falls back to the pool op's verb.
+                    var sentVerb by remember { mutableStateOf<String?>(null) }
+                    // Daylight (public) activity: classic XLM sends/receives from Horizon.
+                    var publicActivity by remember { mutableStateOf<List<com.privatepayments.ui.Activity>>(emptyList()) }
                     // Blinding of the note created by an in-flight deposit; recorded
                     // on success so it can be labelled "Deposit" once scanned back.
                     var pendingDepositBlinding by remember { mutableStateOf<String?>(null) }
@@ -162,6 +252,11 @@ class MainActivity : ComponentActivity() {
                     // Active account's PER-SEED shielded keys + per-account note store.
                     val shielded = remember(accountEpoch, walletAddr) {
                         if (walletAddr != null) runCatching { walletManager.shieldedKeys() }.getOrNull() else null
+                    }
+                    // Shareable "stella:" shielded address — the identity to show/copy
+                    // at the top of Home while in Shielded mode.
+                    val shieldedAddr = remember(shielded) {
+                        shielded?.let { "stella:" + android.util.Base64.encodeToString(it.notePublic + it.encryptionPublic, android.util.Base64.NO_WRAP) }
                     }
                     val noteStore = remember(accountEpoch) { NoteStore(ctx, walletManager.activeIndex) }
                     // Durable, account-independent mirror of chain events (cursor + commitments + ASP leaves).
@@ -331,6 +426,30 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    // Daylight activity: pull the account's classic XLM payment history
+                    // from Horizon when in public mode (refreshes after a send changes txHash).
+                    LaunchedEffect(publicMode, walletAddr, txHash, accountEpoch) {
+                        val addr = walletAddr
+                        if (publicMode && addr != null) {
+                            val pays = withContext(Dispatchers.IO) {
+                                runCatching { HorizonClient.recentPayments(HorizonClient.TESTNET_URL, addr) }
+                                    .getOrDefault(emptyList())
+                            }
+                            publicActivity = pays.map { p ->
+                                com.privatepayments.ui.Activity(
+                                    icon = if (p.sent) Icons.Filled.NorthEast else Icons.Filled.SouthWest,
+                                    title = if (p.sent) "Sent" else "Received",
+                                    private = false,
+                                    amount = "${p.amount} XLM",
+                                    positive = !p.sent,
+                                    time = p.createdAt.take(10),
+                                    subtitle = (if (p.sent) "To " else "From ") +
+                                        if (p.counterparty.length > 12) "${p.counterparty.take(6)}…${p.counterparty.takeLast(4)}" else p.counterparty,
+                                )
+                            }
+                        }
+                    }
+
                     // Avatar = the active account as a letter (A = account 0, B = 1, …).
                     val accountLabel = remember(accountEpoch) { ('A' + walletManager.activeIndex.coerceIn(0, 25)).toString() }
                     // Spending requires ASP enrollment — route unregistered accounts
@@ -340,6 +459,56 @@ class MainActivity : ComponentActivity() {
                     }
                     val amountXlm = "%.4f".format(pendingAmount / 1e7)
 
+                    // Renders the Home/Activity/People tab family for an EXPLICIT
+                    // mode (not necessarily the live `walletMode`) — this lets the
+                    // reveal transition render the old face a second time, frozen,
+                    // while the live tree underneath is already the new mode.
+                    @Composable
+                    fun RenderHomeFamily(mode: WalletMode, onModeChangeRequest: (WalletMode, Offset) -> Unit) {
+                        val topAddress = if (mode == WalletMode.Public) (walletAddr ?: "") else (shieldedAddr ?: walletAddr ?: "")
+                        when (homeTab) {
+                            HomeTab.Home -> HomeScreen(
+                                address = topAddress,
+                                accountLabel = accountLabel,
+                                balanceText = wallet.balanceText(),
+                                publicText = wallet.publicText(),
+                                activity = wallet.activity,
+                                syncStatus = sync,
+                                onSend = { start(Op.Transfer) },
+                                onDeposit = { start(Op.Deposit) },
+                                onWithdraw = { start(Op.Withdraw) },
+                                onReceive = { screen = Screen.Receive },
+                                onSettings = { screen = Screen.Settings },
+                                onShareProof = { if (walletAddr != null) screen = Screen.Disclosure },
+                                registered = isRegistered,
+                                onRegister = { if (walletAddr != null) screen = Screen.Register },
+                                onFund = { withContext(Dispatchers.IO) { walletManager.fundFromTestnet() } },
+                                mode = mode,
+                                onModeChange = onModeChangeRequest,
+                                onPublicSend = { if (walletAddr != null) screen = Screen.PublicSend },
+                                publicActivity = publicActivity,
+                                onSelectTab = { homeTab = it },
+                            )
+                            HomeTab.Activity -> ActivityScreen(
+                                address = topAddress,
+                                accountLabel = accountLabel,
+                                mode = mode,
+                                onModeChange = onModeChangeRequest,
+                                activity = wallet.activity,
+                                publicActivity = publicActivity,
+                                onSettings = { screen = Screen.Settings },
+                                onSelectTab = { homeTab = it },
+                            )
+                            HomeTab.People -> PeopleScreen(
+                                address = topAddress,
+                                accountLabel = accountLabel,
+                                mode = mode,
+                                onSettings = { screen = Screen.Settings },
+                                onSelectTab = { homeTab = it },
+                            )
+                        }
+                    }
+
                     when (screen) {
                         Screen.Splash -> SplashScreen()
                         Screen.Onboarding -> OnboardingScreen(
@@ -347,22 +516,58 @@ class MainActivity : ComponentActivity() {
                             onImport = { p -> withContext(Dispatchers.IO) { walletManager.importPhrase(p) } },
                             onDone = { walletAddr = walletManager.address; accountEpoch++; screen = Screen.Home },
                         )
-                        Screen.Home -> HomeScreen(
-                            address = walletAddr ?: "",
-                            accountLabel = accountLabel,
-                            balanceText = wallet.balanceText(),
-                            publicText = wallet.publicText(),
-                            activity = wallet.activity,
-                            syncStatus = sync,
-                            onSend = { start(Op.Transfer) },
-                            onDeposit = { start(Op.Deposit) },
-                            onWithdraw = { start(Op.Withdraw) },
-                            onReceive = { screen = Screen.Receive },
-                            onSettings = { screen = Screen.Settings },
-                            onShareProof = { if (walletAddr != null) screen = Screen.Disclosure },
-                            registered = isRegistered,
-                            onRegister = { if (walletAddr != null) screen = Screen.Register },
-                            onFund = { withContext(Dispatchers.IO) { walletManager.fundFromTestnet() } },
+                        Screen.Home -> Box(
+                            Modifier.fillMaxSize().onGloballyPositioned { c ->
+                                rootOrigin = c.boundsInWindow().topLeft
+                                rootSize = c.size
+                            },
+                        ) {
+                            // Bottom layer: always the live, current mode.
+                            RenderHomeFamily(walletMode, ::triggerModeChange)
+                            // Top layer: only while revealing — the OLD mode, frozen,
+                            // clipped to everywhere except the growing circle so the
+                            // live layer underneath shows through as it expands.
+                            val from = revealFrom
+                            if (from != null) {
+                                CompositionLocalProvider(LocalUmbraColors provides paletteFor(from)) {
+                                    Box(
+                                        Modifier.fillMaxSize()
+                                            .clip(RevealClipShape(revealCenter, revealRadius.value)),
+                                    ) {
+                                        RenderHomeFamily(from) { _, _ -> }
+                                    }
+                                }
+                            }
+                        }
+                        Screen.PublicSend -> AmountScreen(
+                            title = "Send XLM",
+                            isPublic = true,
+                            // Leave ~1.5 XLM for the base reserve + fee.
+                            maxStroops = (wallet.publicStroops ?: 0L).minus(15_000_000L).coerceAtLeast(0L),
+                            recipientLabel = "Recipient address (G…)",
+                            recipientHint = "G… public Stellar address",
+                            onConfirm = { amt, recip -> pendingAmount = amt; pendingRecipient = recip; screen = Screen.PublicConfirm },
+                            onCancel = { screen = Screen.Home },
+                        )
+                        Screen.PublicConfirm -> ConfirmScreen(
+                            title = "Send XLM",
+                            isPublic = true,
+                            amountXlm = amountXlm,
+                            recipient = if (pendingRecipient.length > 16) "${pendingRecipient.take(10)}…${pendingRecipient.takeLast(6)}" else pendingRecipient,
+                            typeLabel = "Public payment · classic XLM",
+                            onConfirm = { screen = Screen.PublicSending },
+                            onCancel = { screen = Screen.PublicSend },
+                        )
+                        Screen.PublicSending -> PublicSendingScreen(
+                            amountXlm = amountXlm,
+                            send = {
+                                val addr = walletManager.address
+                                val entryXdr = SorobanRpc.getAccountEntryXdr(RPC_URL, accountLedgerKey(addr))
+                                val signed = buildSignedPayment(addr, entryXdr, pendingRecipient, pendingAmount, "", walletManager.secret())
+                                HorizonClient.submit(HorizonClient.TESTNET_URL, signed)
+                            },
+                            onDone = { hash -> sentVerb = "Sent"; txHash = hash; screen = Screen.Success },
+                            onCancel = { screen = Screen.Home },
                         )
                         Screen.Amount -> AmountScreen(
                             title = op.title,
@@ -490,15 +695,16 @@ class MainActivity : ComponentActivity() {
                             },
                             onCancel = { screen = Screen.Home },
                         )
-                        Screen.Success -> SuccessScreen(op.verb, amountXlm, txHash) { screen = Screen.Home }
+                        Screen.Success -> SuccessScreen(sentVerb ?: op.verb, amountXlm, txHash) { sentVerb = null; screen = Screen.Home }
                         Screen.Register -> RegisterScreen(
                             onRegister = doRegister,
                             onRegistered = { screen = Screen.Home },
                             onCancel = { screen = Screen.Home },
                         )
                         Screen.Receive -> ReceiveScreen(
+                            mode = walletMode,
                             stellarAddress = walletManager.address,
-                            shieldedAddress = shielded?.let { "stella:" + android.util.Base64.encodeToString(it.notePublic + it.encryptionPublic, android.util.Base64.NO_WRAP) },
+                            shieldedAddress = shieldedAddr,
                             onClose = { screen = Screen.Home },
                         )
                         Screen.Settings -> SettingsScreen(
@@ -618,7 +824,78 @@ private fun SuccessScreen(verb: String, amount: String, txHash: String, onClose:
                 .clickable { onClose() }
                 .padding(vertical = 16.dp),
             contentAlignment = Alignment.Center,
-        ) { Text("Done", color = Umbra.Bg, fontWeight = FontWeight.SemiBold) }
+        ) { Text("Done", color = Umbra.IconOnPrimary, fontWeight = FontWeight.SemiBold) }
+    }
+}
+
+/**
+ * Classic public XLM send — no ZK proof, just build+sign (Rust) then submit to
+ * Horizon. Runs on entry; shows a spinner, then routes to Success or an inline
+ * error with a retry.
+ */
+@Composable
+private fun PublicSendingScreen(
+    amountXlm: String,
+    send: suspend () -> String,
+    onDone: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableStateOf(0) }
+    LaunchedEffect(attempt) {
+        error = null
+        val result = withContext(Dispatchers.IO) { runCatching { send() } }
+        result.onSuccess { onDone(it) }.onFailure { error = it.message ?: "Payment failed" }
+    }
+    Column(
+        Modifier.fillMaxSize().background(Umbra.Bg).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        if (error == null) {
+            CircularProgressIndicator(color = Umbra.Primary, strokeWidth = 3.dp, modifier = Modifier.size(56.dp))
+            Spacer(Modifier.height(28.dp))
+            Text("Sending", color = Umbra.TextPrimary, fontFamily = Umbra.Display, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text("$amountXlm XLM · public payment on Stellar", color = Umbra.TextMuted, fontSize = 14.sp)
+        } else {
+            Box(
+                Modifier.size(88.dp).clip(CircleShape).background(Umbra.Error.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Check, null, tint = Umbra.Error, modifier = Modifier.size(40.dp)) }
+            Spacer(Modifier.height(24.dp))
+            Text("Couldn't send", color = Umbra.TextPrimary, fontFamily = Umbra.Display, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            Text(error!!, color = Umbra.TextMuted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+            Spacer(Modifier.height(20.dp))
+            Box(
+                Modifier.clip(RoundedCornerShape(12.dp)).background(Umbra.SurfaceElevated)
+                    .clickable { attempt++ }.padding(horizontal = 20.dp, vertical = 10.dp),
+            ) { Text("Try again", color = Umbra.Primary, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+        }
+        Spacer(Modifier.weight(1f))
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.Surface)
+                .clickable { onCancel() }.padding(vertical = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) { Text(if (error == null) "Cancel" else "Back", color = Umbra.TextSecondary, fontWeight = FontWeight.Medium) }
+    }
+}
+
+/**
+ * A full-rect shape with a circular hole cut out (even-odd fill: rect + oval
+ * overlap cancels). Used to clip the "old mode" reveal layer so the growing
+ * circle is transparent, letting the live "new mode" layer underneath show
+ * through — the standard circular-reveal wipe, with no bitmap/snapshot APIs.
+ */
+private class RevealClipShape(private val center: Offset, private val radius: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val path = Path().apply {
+            fillType = PathFillType.EvenOdd
+            addRect(Rect(Offset.Zero, size))
+            if (radius > 0f) addOval(Rect(center - Offset(radius, radius), center + Offset(radius, radius)))
+        }
+        return Outline.Generic(path)
     }
 }
 

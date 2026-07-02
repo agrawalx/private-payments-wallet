@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -27,7 +28,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.privatepayments.ui.theme.Umbra
+import com.privatepayments.ui.theme.WalletMode
 import com.privatepayments.ui.theme.cardDepth
+import com.privatepayments.ui.theme.elevatedCard
 import com.privatepayments.ui.theme.umbraScreen
 import kotlinx.coroutines.launch
 
@@ -40,6 +43,10 @@ data class Activity(
     val time: String,
     val subtitle: String? = null,
 )
+
+/** The three bottom-nav destinations that live "inside" Home (Settings is a
+ *  separate pushed screen, not a tab — see [Screen] in MainActivity). */
+enum class HomeTab { Home, Activity, People }
 
 @androidx.compose.runtime.Composable
 fun HomeScreen(
@@ -58,8 +65,14 @@ fun HomeScreen(
     registered: Boolean = true,
     onRegister: () -> Unit = {},
     onFund: suspend () -> Pair<Boolean, String> = { false to "Fund unavailable" },
+    mode: WalletMode = WalletMode.Shielded,
+    onModeChange: (WalletMode, Offset) -> Unit = { _, _ -> },
+    onPublicSend: () -> Unit = {},
+    publicActivity: List<Activity> = emptyList(),
+    onSelectTab: (HomeTab) -> Unit = {},
 ) {
     var revealed by remember { mutableStateOf(false) }
+    val isPublic = mode == WalletMode.Public
 
     Column(
         Modifier
@@ -73,28 +86,52 @@ fun HomeScreen(
                 .padding(horizontal = 20.dp)
         ) {
             Spacer(Modifier.height(16.dp))
-            TopBar(address, accountLabel, onSettings)
+            TopBar(address, accountLabel, isPublic, onSettings)
+            Spacer(Modifier.height(14.dp))
+            ModeSlider(mode, onModeChange, Modifier.align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(14.dp))
             SyncBanner(syncStatus)
-            if (!registered) {
+            // The mode switch's visual transition is a circular reveal wrapping
+            // this whole tab family (see MainActivity's ModeReveal) — this branch
+            // just snaps to whichever face is active, no local animation needed.
+            if (isPublic) {
+                // ☀ Daylight: your normal Stellar wallet — public XLM, classic send.
                 Spacer(Modifier.height(14.dp))
-                RegisterBanner(onRegister)
+                PublicBalanceCard(publicText)
+                Spacer(Modifier.height(10.dp))
+                FundButton(onFund)
+                Spacer(Modifier.height(20.dp))
+                PublicActionRow(onSend = onPublicSend, onReceive = onReceive)
+            } else {
+                // 🌙 Umbra: the shielded pool — deposit in, send/withdraw privately.
+                if (!registered) {
+                    Spacer(Modifier.height(14.dp))
+                    RegisterBanner(onRegister)
+                }
+                Spacer(Modifier.height(14.dp))
+                BalanceCard(revealed, balanceText) { revealed = !revealed }
+                Spacer(Modifier.height(20.dp))
+                ActionRow(onSend = onSend, onDeposit = onDeposit, onWithdraw = onWithdraw, onReceive = onReceive)
+                Spacer(Modifier.height(14.dp))
+                ShareProofButton(onShareProof)
             }
-            Spacer(Modifier.height(14.dp))
-            BalanceCard(revealed, balanceText, publicText) { revealed = !revealed }
-            Spacer(Modifier.height(10.dp))
-            FundButton(onFund)
-            Spacer(Modifier.height(20.dp))
-            ActionRow(onSend = onSend, onDeposit = onDeposit, onWithdraw = onWithdraw, onReceive = onReceive)
-            Spacer(Modifier.height(14.dp))
-            ShareProofButton(onShareProof)
             Spacer(Modifier.height(28.dp))
-            ActivityHeader()
+            ActivityHeader(onSeeAll = { onSelectTab(HomeTab.Activity) })
             Spacer(Modifier.height(8.dp))
-            activity.forEach { ActivityRow(it); Spacer(Modifier.height(6.dp)) }
+            val shown = if (isPublic) publicActivity else activity
+            if (shown.isEmpty()) {
+                Text(
+                    if (isPublic) "No public payments yet" else "No shielded notes yet",
+                    color = Umbra.TextFaint, fontSize = 13.sp,
+                    modifier = Modifier.padding(vertical = 10.dp),
+                )
+            } else {
+                // Preview only — "See all" / the Activity tab has the full list.
+                shown.take(5).forEach { ActivityRow(it); Spacer(Modifier.height(6.dp)) }
+            }
             Spacer(Modifier.height(24.dp))
         }
-        BottomNav(onSettings)
+        BottomNav(HomeTab.Home, onSelectTab, onSettings)
     }
 }
 
@@ -182,7 +219,7 @@ private fun ShareProofButton(onClick: () -> Unit) {
 }
 
 @androidx.compose.runtime.Composable
-private fun TopBar(address: String, accountLabel: String, onOpenWallet: () -> Unit) {
+internal fun TopBar(address: String, accountLabel: String, isPublic: Boolean, onOpenWallet: () -> Unit) {
     val ctx = LocalContext.current
     val short = if (address.length > 12) "${address.take(6)}…${address.takeLast(4)}" else address
     Column {
@@ -193,12 +230,18 @@ private fun TopBar(address: String, accountLabel: String, onOpenWallet: () -> Un
                     .background(Brush.linearGradient(listOf(Umbra.Primary, Umbra.PrimaryDeep)))
                     .clickable { onOpenWallet() },
                 contentAlignment = Alignment.Center,
-            ) { Text(accountLabel, color = Umbra.TextPrimary, fontWeight = FontWeight.Bold) }
+            ) { Text(accountLabel, color = Umbra.IconOnPrimary, fontWeight = FontWeight.Bold) }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Lock, null, tint = Umbra.Primary, modifier = Modifier.size(13.dp))
+                Icon(
+                    if (isPublic) Icons.Filled.Public else Icons.Filled.Lock,
+                    null, tint = Umbra.Primary, modifier = Modifier.size(13.dp),
+                )
                 Spacer(Modifier.width(5.dp))
-                Text("Stellar · Testnet", color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    if (isPublic) "Stellar · Public" else "Stellar · Shielded",
+                    color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                )
             }
 
             Box(
@@ -224,7 +267,7 @@ private fun TopBar(address: String, accountLabel: String, onOpenWallet: () -> Un
 }
 
 @androidx.compose.runtime.Composable
-private fun BalanceCard(revealed: Boolean, balanceText: String, publicText: String, onToggle: () -> Unit) {
+private fun BalanceCard(revealed: Boolean, balanceText: String, onToggle: () -> Unit) {
     // Design's bordered balance card: dark purple gradient box + hairline, a small
     // "Shielded balance" label with an eye, a left-aligned number, and a glow that
     // pools in the top-right corner (by the eye) and fades inward.
@@ -269,17 +312,52 @@ private fun BalanceCard(revealed: Boolean, balanceText: String, publicText: Stri
                 if (revealed) "Tap to hide" else "Tap to reveal · hidden for privacy",
                 color = Umbra.TextFaint, fontSize = 12.5.sp,
             )
-            Spacer(Modifier.height(14.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Umbra.Border))
-            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/** ☀ Daylight balance card — light, joyful, the public XLM balance as hero. */
+@androidx.compose.runtime.Composable
+private fun PublicBalanceCard(publicText: String) {
+    val shape = RoundedCornerShape(24.dp)
+    Box(Modifier.fillMaxWidth().elevatedCard(shape)) {
+        // Warm amber corner glow (the Daylight counterpart of the purple pool glow).
+        Box(
+            Modifier.align(Alignment.TopEnd).offset(x = 30.dp, y = (-38).dp).size(130.dp)
+                .background(Brush.radialGradient(listOf(Umbra.Public.copy(alpha = 0.18f), Color.Transparent)), CircleShape),
+        )
+        Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 20.dp, bottom = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Public, null, tint = Umbra.Public, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Public balance", color = Umbra.TextMuted, fontSize = 12.sp)
+                Text("Public balance", color = Umbra.Public, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                Text("$publicText XLM", color = Umbra.TextSecondary, fontFamily = Umbra.Display, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Icon(Icons.Filled.WbSunny, null, tint = Umbra.Public, modifier = Modifier.size(16.dp))
             }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    publicText, color = Umbra.TextPrimary, fontFamily = Umbra.Display,
+                    fontSize = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("XLM", color = Umbra.TextMuted, fontSize = 18.sp, modifier = Modifier.padding(bottom = 6.dp))
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("Spendable · on Stellar testnet", color = Umbra.TextMuted, fontSize = 12.5.sp)
         }
+    }
+}
+
+/** ☀ Daylight actions — classic send + receive (no proofs, no pool). */
+@androidx.compose.runtime.Composable
+private fun PublicActionRow(onSend: () -> Unit, onReceive: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(56.dp, Alignment.CenterHorizontally),
+    ) {
+        ActionButton(Icons.Filled.ArrowUpward, "Send", ActionStyle.Primary, onClick = onSend)
+        ActionButton(Icons.Filled.QrCode2, "Receive", ActionStyle.Neutral, onClick = onReceive)
     }
 }
 
@@ -333,16 +411,19 @@ private fun ActionButton(icon: ImageVector, label: String, style: ActionStyle, o
 }
 
 @androidx.compose.runtime.Composable
-private fun ActivityHeader() {
+private fun ActivityHeader(onSeeAll: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Recent activity", color = Umbra.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.weight(1f))
-        Text("See all", color = Umbra.Primary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(
+            "See all", color = Umbra.Primary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.clickable(onClick = onSeeAll),
+        )
     }
 }
 
 @androidx.compose.runtime.Composable
-private fun ActivityRow(a: Activity) {
+internal fun ActivityRow(a: Activity) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.Surface).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -382,14 +463,14 @@ private fun ActivityRow(a: Activity) {
 }
 
 @androidx.compose.runtime.Composable
-private fun BottomNav(onSettings: () -> Unit) {
+internal fun BottomNav(activeTab: HomeTab, onSelectTab: (HomeTab) -> Unit, onSettings: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(Umbra.Surface).padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        NavItem(Icons.Filled.Home, "Home", true) {}
-        NavItem(Icons.Filled.ReceiptLong, "Activity", false) {}
-        NavItem(Icons.Filled.Contacts, "People", false) {}
+        NavItem(Icons.Filled.Home, "Home", activeTab == HomeTab.Home) { onSelectTab(HomeTab.Home) }
+        NavItem(Icons.Filled.ReceiptLong, "Activity", activeTab == HomeTab.Activity) { onSelectTab(HomeTab.Activity) }
+        NavItem(Icons.Filled.Contacts, "People", activeTab == HomeTab.People) { onSelectTab(HomeTab.People) }
         NavItem(Icons.Filled.Settings, "Settings", false, onSettings)
     }
 }

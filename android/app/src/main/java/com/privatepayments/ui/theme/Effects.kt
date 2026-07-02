@@ -40,18 +40,24 @@ import androidx.compose.ui.unit.sp
 // hairline borders, purple gradient CTAs with a glow halo, and subtle motion.
 // These helpers centralize all of that so screens stay terse.
 
-/** Board background + the design's ambient purple glow anchored top-left. */
-fun Modifier.umbraScreen(): Modifier = this
-    .background(Umbra.Bg)
-    .drawBehind {
-        drawRect(
-            Brush.radialGradient(
-                colors = listOf(Umbra.Primary.copy(alpha = 0.10f), Color.Transparent),
-                center = Offset(size.width * 0.18f, size.height * 0.04f),
-                radius = size.minDimension * 1.15f,
-            ),
-        )
-    }
+/** Board background + the ambient hero-accent glow anchored top-left (purple in
+ *  Umbra, warm amber in Daylight — it follows the active palette). */
+@Composable
+fun Modifier.umbraScreen(): Modifier {
+    val bg = Umbra.Bg
+    val glow = Umbra.Primary
+    return this
+        .background(bg)
+        .drawBehind {
+            drawRect(
+                Brush.radialGradient(
+                    colors = listOf(glow.copy(alpha = 0.10f), Color.Transparent),
+                    center = Offset(size.width * 0.18f, size.height * 0.04f),
+                    radius = size.minDimension * 1.15f,
+                ),
+            )
+        }
+}
 
 /** Soft drop-shadow card depth (design's `0 24px 64px rgba(0,0,0,.5)`). */
 fun Modifier.cardDepth(shape: RoundedCornerShape, elevation: Dp = 14.dp): Modifier =
@@ -62,6 +68,7 @@ fun Modifier.glow(color: Color, shape: RoundedCornerShape, elevation: Dp = 16.dp
     this.shadow(elevation, shape, clip = false, ambientColor = color, spotColor = color)
 
 /** A raised surface card: gradient fill + hairline border + depth. */
+@Composable
 fun Modifier.elevatedCard(shape: RoundedCornerShape): Modifier = this
     .cardDepth(shape)
     .clip(shape)

@@ -48,6 +48,8 @@ google-services.json
 .env.*
 secrets.*
 
+session.txt
+
 # Keep (do NOT ignore) — these are committed assets the build needs:
 #   prover-ffi/circuits/*.bin  *.r1cs  *.wasm   (embedded via include_bytes!)
 #   prover-ffi/fixtures/*.json                  (params templates)

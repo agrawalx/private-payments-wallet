@@ -775,6 +775,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -811,6 +813,8 @@ internal interface UniffiLib : Library {
     fun uniffi_prover_ffi_fn_func_build_asp_proofs(`notePublicKeyHex`: RustBuffer.ByValue,`membershipLeavesDec`: RustBuffer.ByValue,`membershipDepth`: Int,`nonMembershipFixtureJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_build_deposit_params(`fixtureJson`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`commitmentTopicsB64`: RustBuffer.ByValue,`treeDepth`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_prover_ffi_fn_func_build_signed_payment(`sourceAddress`: RustBuffer.ByValue,`accountEntryXdr`: RustBuffer.ByValue,`destAddress`: RustBuffer.ByValue,`amountStroops`: Long,`memo`: RustBuffer.ByValue,`sourceSecret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_build_transfer_params(`fixtureJson`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`recipientNotePub`: RustBuffer.ByValue,`recipientEncPub`: RustBuffer.ByValue,`inputs`: RustBuffer.ByValue,`commitmentTopicsB64`: RustBuffer.ByValue,`treeDepth`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -988,6 +992,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_prover_ffi_checksum_func_build_deposit_params(
     ): Short
+    fun uniffi_prover_ffi_checksum_func_build_signed_payment(
+    ): Short
     fun uniffi_prover_ffi_checksum_func_build_transfer_params(
     ): Short
     fun uniffi_prover_ffi_checksum_func_build_unsigned_asp_register(
@@ -1078,6 +1084,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_build_deposit_params() != 2741.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_prover_ffi_checksum_func_build_signed_payment() != 25429.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_build_transfer_params() != 32173.toShort()) {
@@ -2207,6 +2216,23 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
     uniffiRustCallWithError(ProverException) { _status ->
     UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_build_deposit_params(
         FfiConverterString.lower(`fixtureJson`),FfiConverterString.lower(`amount`),FfiConverterSequenceString.lower(`commitmentTopicsB64`),FfiConverterUInt.lower(`treeDepth`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Build + sign a **classic native-XLM payment** (Daylight / public mode) in one
+         * call. Returns the signed base64 envelope — submit it via **Horizon**
+         * `POST /transactions` (not Soroban RPC). `memo` empty = no memo.
+         * `account_entry_xdr` is the base64 `LedgerEntryData::Account` from
+         * getLedgerEntries; the tx uses `seq + 1`.
+         */
+    @Throws(ProverException::class) fun `buildSignedPayment`(`sourceAddress`: kotlin.String, `accountEntryXdr`: kotlin.String, `destAddress`: kotlin.String, `amountStroops`: kotlin.Long, `memo`: kotlin.String, `sourceSecret`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(ProverException) { _status ->
+    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_build_signed_payment(
+        FfiConverterString.lower(`sourceAddress`),FfiConverterString.lower(`accountEntryXdr`),FfiConverterString.lower(`destAddress`),FfiConverterLong.lower(`amountStroops`),FfiConverterString.lower(`memo`),FfiConverterByteArray.lower(`sourceSecret`),_status)
 }
     )
     }
