@@ -57,7 +57,7 @@ fun HomeScreen(
     onShareProof: () -> Unit,
     registered: Boolean = true,
     onRegister: () -> Unit = {},
-    onFund: suspend () -> Boolean = { false },
+    onFund: suspend () -> Pair<Boolean, String> = { false to "Fund unavailable" },
 ) {
     var revealed by remember { mutableStateOf(false) }
 
@@ -112,7 +112,7 @@ private fun SyncBanner(status: String) {
 }
 
 @androidx.compose.runtime.Composable
-private fun FundButton(onFund: suspend () -> Boolean) {
+private fun FundButton(onFund: suspend () -> Pair<Boolean, String>) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -122,13 +122,11 @@ private fun FundButton(onFund: suspend () -> Boolean) {
             .clickable(enabled = !busy) {
                 scope.launch {
                     busy = true
-                    val ok = runCatching { onFund() }.getOrDefault(false)
+                    val (_, message) = runCatching { onFund() }
+                        .getOrDefault(false to "Fund failed unexpectedly")
                     busy = false
                     android.widget.Toast.makeText(
-                        ctx,
-                        if (ok) "Requested 10,000 test XLM — balance updates shortly"
-                        else "Couldn't fund (already funded or rate-limited)",
-                        android.widget.Toast.LENGTH_SHORT,
+                        ctx, message, android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
             }

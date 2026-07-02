@@ -121,8 +121,8 @@ class WalletManager(context: Context) {
         return newIndex
     }
 
-    /** Friendbot-fund the active account (testnet). Returns true on success. */
-    fun fundFromTestnet(): Boolean = friendbotFund(address)
+    /** Friendbot-fund the active account (testnet). Returns (success, message). */
+    fun fundFromTestnet(): Pair<Boolean, String> = friendbotFund(address)
 
     /** Switch the active account (re-derives address/secret). */
     fun setActive(index: Int) {
@@ -137,16 +137,26 @@ class WalletManager(context: Context) {
         secret = acct.secret
     }
 
-    /** Friendbot-funds a testnet account over Android system TLS. Best-effort. */
-    private fun friendbotFund(address: String): Boolean = try {
+    /** Friendbot-funds a testnet account over Android system TLS. Returns (success, reason). */
+    private fun friendbotFund(address: String): Pair<Boolean, String> = try {
         val conn = URL("https://friendbot.stellar.org?addr=$address").openConnection() as HttpURLConnection
         conn.connectTimeout = 10000
         conn.readTimeout = 30000
-        val ok = conn.responseCode in 200..299
+        val code = conn.responseCode
+        val ok = code in 200..299
+        val body = (if (ok) conn.inputStream else conn.errorStream)
+            ?.bufferedReader()?.use { it.readText() } ?: ""
         conn.disconnect()
-        ok
+        val reason = when {
+            ok -> "Requested 10,000 test XLM — balance updates shortly"
+            code == 429 -> "Rate-limited by friendbot — try again in a bit"
+            body.contains("op_already_exists", ignoreCase = true) -> "Account already funded"
+            else -> "Friendbot error ($code): ${body.take(200)}"
+        }
+        android.util.Log.i("StellaWallet", "friendbot fund: code=$code ok=$ok body=${body.take(200)}")
+        Pair(ok, reason)
     } catch (e: Exception) {
-        android.util.Log.w("StellaWallet", "friendbot fund failed: ${e.message}")
-        false
+        android.util.Log.w("StellaWallet", "friendbot fund failed: ${e}")
+        Pair(false, "Fund failed: ${e.message ?: e.javaClass.simpleName}")
     }
 }

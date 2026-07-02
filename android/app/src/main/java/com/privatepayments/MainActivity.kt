@@ -27,6 +27,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.ApiException
 import com.privatepayments.net.DriveBackup
 import com.privatepayments.net.IndexerClient
+import com.privatepayments.net.InsecureTls
 import com.privatepayments.net.RelayerClient
 import com.privatepayments.net.SorobanRpc
 import com.privatepayments.state.ChainStore
@@ -85,6 +86,7 @@ import uniffi.prover_ffi.finalizeAndSign
 import uniffi.prover_ffi.provePolicyTx22Json
 import uniffi.prover_ffi.rebuildInputPath
 import uniffi.prover_ffi.scanNote
+import uniffi.prover_ffi.verifyProofBundle
 
 private const val POOL_ID = "CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V"
 private const val ASP_MEMBERSHIP_ID = "CC5XHHWNZDBLDBSYI54YBXN2RSJU52T4QTHMEYEFGIBG7CYAWLNWV5ZO"
@@ -126,6 +128,7 @@ private enum class Op(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        InsecureTls.installGlobally()
 
         // Per-op params templates (live-rebuilt in-app before each tx).
         val params: Map<Op, String> = Op.entries.associateWith { op ->
@@ -309,17 +312,22 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             // Public (Stellar account) XLM balance.
+                            var publicError: String? = null
                             walletAddr?.let { addr ->
-                                val pub = withContext(Dispatchers.IO) {
+                                val result = withContext(Dispatchers.IO) {
                                     runCatching {
                                         accountBalanceStroops(SorobanRpc.getAccountEntryXdr(RPC_URL, accountLedgerKey(addr)))
-                                    }.getOrNull()
+                                    }
                                 }
-                                wallet.applyPublic(pub)
+                                wallet.applyPublic(result.getOrNull())
+                                publicError = result.exceptionOrNull()?.message
                             }
                             val c = noteStore.counts()
-                            sync = if (!delta.reachable) "Indexer unreachable"
-                            else "Synced · ${chainStore.commitmentCount()} commitments · ${c.unspent} unspent / ${c.spent} spent note(s)"
+                            sync = when {
+                                !delta.reachable -> "Indexer unreachable"
+                                publicError != null -> "Public balance error: $publicError"
+                                else -> "Synced · ${chainStore.commitmentCount()} commitments · ${c.unspent} unspent / ${c.spent} spent note(s)"
+                            }
                             delay(5000)
                         }
                     }
@@ -446,6 +454,14 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 val bundle = withContext(Dispatchers.Default) { provePolicyTx22Json(a.circuitInputsJson) }
+                                run {
+                                    val localOk = runCatching { verifyProofBundle(bundle) }.getOrElse { "threw: ${it.message}" }
+                                    android.util.Log.w(
+                                        "ProofDiag",
+                                        "op=$op localVerify=$localOk aspLeaves=${aspLeaves.size} " +
+                                            "commitments=${commitmentTopics.size} extDataHash=${a.extDataHash.joinToString("") { "%02x".format(it) }}",
+                                    )
+                                }
                                 advance(2)
                                 val hash = withContext(Dispatchers.IO) {
                                     // Withdraw/transfer go through the relayer so the
