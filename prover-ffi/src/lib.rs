@@ -1621,7 +1621,7 @@ mod tests {
         eprintln!("wrote {out}");
     }
 
-    const POOL_ID: &str = "CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V";
+    const POOL_ID: &str = "CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU";
     const RPC_URL: &str = "https://soroban-testnet.stellar.org";
 
     // ---- Desktop-only RPC helpers (reqwest dev-dep) ------------------------

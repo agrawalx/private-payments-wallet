@@ -42,6 +42,11 @@ The indexer polls the Soroban RPC for the pool + ASP contract events and serves 
 > contains the full event history; restore it first, then the indexer only fetches *new* events from
 > there. Inserts are idempotent (`event_id` is `UNIQUE`, `ON CONFLICT DO NOTHING`), so any overlap is
 > deduped — no duplicate events.
+>
+> **Note:** the contracts below were redeployed fresh (deployment ledger `3395077`), so the bundled
+> `stella_events.sql` seed is stale (it's for the *previous* deployment) and step (b) can be skipped
+> until you regenerate the seed — a brand-new indexer starting at the deployment ledger sees the
+> complete history since nothing has fallen out of RPC's retention window yet.
 
 ```sh
 # (a) Postgres — matches the indexer's default DATABASE_URL (localhost:5434, user/pw/db=indexer)
@@ -56,8 +61,8 @@ docker exec -i pp-indexer-pg psql -U indexer -d indexer < indexer/seed/stella_ev
 # (c) build + run the indexer — it resumes from the seeded cursor and pulls only NEW events
 cargo build --release -p indexer
 
-INDEXER_CONTRACTS="CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V,CC5XHHWNZDBLDBSYI54YBXN2RSJU52T4QTHMEYEFGIBG7CYAWLNWV5ZO,CDS5Q4CFZXTFQCTKKYKXROLWVEIM4IBQZFLL3YBDITD3ZOU5SSSRW2GN" \
-INDEXER_START_LEDGER=3163570 \
+INDEXER_CONTRACTS="CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU,CDPU2F73UKCYBXK7LRE25JAM7G7MZQANKZRIAEORKRJZSSPDK4CAE5A6,CDH4LEBFJN5UHZ5GC5R2P5POXLWOJ4QTL7LS6RH4UKQ6JBVTC43I7ZRP" \
+INDEXER_START_LEDGER=3395077 \
 ./target/release/indexer
 
 # (d) sanity check (in another shell)
@@ -138,10 +143,10 @@ hosted indexer the app needs no local services at all.
 
 | Contract | ID |
 |---|---|
-| Pool (native XLM) | `CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V` |
-| Groth16 verifier | `CAKRG62BKMRIR5S2SUOC4T5EFLLRBRJ7NTOFZOTCNYKGW4ZJME7BR4N6` |
-| ASP membership (permissionless) | `CC5XHHWNZDBLDBSYI54YBXN2RSJU52T4QTHMEYEFGIBG7CYAWLNWV5ZO` |
-| ASP non-membership | `CDS5Q4CFZXTFQCTKKYKXROLWVEIM4IBQZFLL3YBDITD3ZOU5SSSRW2GN` |
+| Pool (native XLM) | `CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU` |
+| Groth16 verifier | `CDT6PXNQQRIENHNI6FBQCD5AQN7FK6TEDSM7XWPLHDRRABCUOT4JB5GI` |
+| ASP membership (permissionless) | `CDPU2F73UKCYBXK7LRE25JAM7G7MZQANKZRIAEORKRJZSSPDK4CAE5A6` |
+| ASP non-membership | `CDH4LEBFJN5UHZ5GC5R2P5POXLWOJ4QTL7LS6RH4UKQ6JBVTC43I7ZRP` |
 
 ## Notes
 

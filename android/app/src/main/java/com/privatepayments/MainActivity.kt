@@ -86,10 +86,9 @@ import uniffi.prover_ffi.finalizeAndSign
 import uniffi.prover_ffi.provePolicyTx22Json
 import uniffi.prover_ffi.rebuildInputPath
 import uniffi.prover_ffi.scanNote
-import uniffi.prover_ffi.verifyProofBundle
 
-private const val POOL_ID = "CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V"
-private const val ASP_MEMBERSHIP_ID = "CC5XHHWNZDBLDBSYI54YBXN2RSJU52T4QTHMEYEFGIBG7CYAWLNWV5ZO"
+private const val POOL_ID = "CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU"
+private const val ASP_MEMBERSHIP_ID = "CDPU2F73UKCYBXK7LRE25JAM7G7MZQANKZRIAEORKRJZSSPDK4CAE5A6"
 private const val RPC_URL = "https://soroban-testnet.stellar.org"
 
 // Route withdraw/transfer through the relayer (its account is the on-chain
@@ -454,14 +453,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 val bundle = withContext(Dispatchers.Default) { provePolicyTx22Json(a.circuitInputsJson) }
-                                run {
-                                    val localOk = runCatching { verifyProofBundle(bundle) }.getOrElse { "threw: ${it.message}" }
-                                    android.util.Log.w(
-                                        "ProofDiag",
-                                        "op=$op localVerify=$localOk aspLeaves=${aspLeaves.size} " +
-                                            "commitments=${commitmentTopics.size} extDataHash=${a.extDataHash.joinToString("") { "%02x".format(it) }}",
-                                    )
-                                }
                                 advance(2)
                                 val hash = withContext(Dispatchers.IO) {
                                     // Withdraw/transfer go through the relayer so the
