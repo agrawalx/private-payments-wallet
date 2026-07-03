@@ -87,8 +87,9 @@ so the relayer cannot redirect or skim.
 amount → **Confirm**.
 
 <p align="center">
-  <img src="screenshots/10_send_recipient.png" width="220" alt="Send recipient" />
-  <img src="screenshots/11_send_confirm.png"   width="220" alt="Send confirm" />
+  <img src="screenshots/send_amount.jpg" width="220" alt="Send recipient" />
+  <img src="screenshots/send_review.jpg"   width="220" alt="Send confirm" />
+  <img src="screenshots/send_confirm.jpg"   width="220" alt="Send confirm" />  
 </p>
 
 ### 7. Withdraw — shielded pool back to a public address
@@ -96,7 +97,7 @@ Consolidates up to 4 notes and pays out to any public `G…` address, also via t
 
 **How to use:** Shielded Home → **Withdraw** → destination `G…` address → amount → **Confirm**.
 
-<p align="center"><img src="screenshots/12_withdraw.png" width="230" alt="Withdraw" /></p>
+<p align="center"><img src="screenshots/withdraw.jpg" width="230" alt="Withdraw" /></p>
 
 ### 8. The proof moment — on-device Groth16
 Every shielded spend builds a real Groth16 proof on the phone (rapidsnark, ~1.9 s on the 4-in/2-out
@@ -106,15 +107,8 @@ circuit; cached arkworks fallback ~4–5 s). No server ever sees your keys, amou
 *"ZK proof built on your phone in X.Xs."*
 
 <p align="center">
-  <img src="screenshots/13_proof_stepper.png" width="220" alt="Proof stepper" />
-  <img src="screenshots/14_success.png"       width="220" alt="Success + confetti" />
+  <img src="screenshots/proof.jpg" width="220" alt="Proof stepper" />
 </p>
-
-### 9. Success + share receipt
-Scale-in confetti, the proof timing, and **Share receipt** (verb + amount + tx hash + explorer URL).
-
-**How to use:** appears automatically after any send/withdraw/deposit; tap **Share** to hand off a
-receipt.
 
 ### 10. Activity — mode-aware history
 Public payments grouped by day with a tap-through to stellar.expert; shielded notes labelled
@@ -124,8 +118,8 @@ spinner row instantly and resolve when the note-set changes.
 **How to use:** the **Activity** tab → filter chips at the top → tap any row for detail.
 
 <p align="center">
-  <img src="screenshots/15_activity.png"        width="220" alt="Activity feed" />
-  <img src="screenshots/16_activity_filters.png" width="220" alt="Activity filters" />
+  <img src="screenshots/public_activity.jpg"        width="220" alt="Activity feed" />
+  <img src="screenshots/private_activity.jpg" width="220" alt="Activity filters" />
 </p>
 
 ### 11. Transaction detail
