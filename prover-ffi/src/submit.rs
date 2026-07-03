@@ -14,7 +14,7 @@
 //! This drops the `stellar` crate dependency that forced `rustls-platform-verifier`
 //! (unusable under Android JNA) into the build.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use stellar_xdr::curr::{
@@ -107,7 +107,7 @@ fn groth16_proof_to_scval(proof_uncompressed: &[u8]) -> Result<ScVal> {
 /// Public inputs of a pool proof, in field order.
 struct PoolPublicInputs {
     root: Field,
-    input_nullifiers: [Field; 2],
+    input_nullifiers: [Field; 4],
     output_commitment0: Field,
     output_commitment1: Field,
     public_amount: Field,
@@ -200,22 +200,35 @@ pub fn account_ledger_key(address: &str) -> Result<String> {
     Ok(key.to_xdr_base64(Limits::none())?)
 }
 
-/// Builds the public inputs struct from the 11 little-endian 32-byte chunks
-/// (order: root, publicAmount, extDataHash, null0, null1, comm0, comm1,
-/// memRoot0, memRoot1, nonMemRoot0, nonMemRoot1) + raw ext_data_hash bytes.
+/// Builds the public inputs struct from the 17 little-endian 32-byte chunks
+/// (order: root, publicAmount, extDataHash, null0..3, comm0, comm1,
+/// memRoot0..3, nonMemRoot0..3) + raw ext_data_hash bytes.
+///
+/// The 4 memRoot/nonMemRoot entries are the same ASP root duplicated once per
+/// input slot (`policy_tx_4_2` has `N_INPUTS` membership/non-membership
+/// roots, one per input) — they must all agree, since there's only one ASP
+/// tree per proof; disagreement means a malformed proof.
 fn public_inputs_from_bytes(pi: &[u8], ext_data_hash: &[u8]) -> Result<PoolPublicInputs> {
     let f = |i: usize| -> Result<Field> {
         let s: [u8; 32] = pi[i * 32..i * 32 + 32].try_into()?;
         Field::try_from_le_bytes(s)
     };
+    let mem_roots = [f(9)?, f(10)?, f(11)?, f(12)?];
+    if mem_roots[1..].iter().any(|r| *r != mem_roots[0]) {
+        bail!("asp membership roots disagree across input slots: {mem_roots:?}");
+    }
+    let non_mem_roots = [f(13)?, f(14)?, f(15)?, f(16)?];
+    if non_mem_roots[1..].iter().any(|r| *r != non_mem_roots[0]) {
+        bail!("asp non-membership roots disagree across input slots: {non_mem_roots:?}");
+    }
     Ok(PoolPublicInputs {
         root: f(0)?,
         public_amount: f(1)?,
-        input_nullifiers: [f(3)?, f(4)?],
-        output_commitment0: f(5)?,
-        output_commitment1: f(6)?,
-        asp_membership_root: f(7)?,
-        asp_non_membership_root: f(9)?,
+        input_nullifiers: [f(3)?, f(4)?, f(5)?, f(6)?],
+        output_commitment0: f(7)?,
+        output_commitment1: f(8)?,
+        asp_membership_root: mem_roots[0],
+        asp_non_membership_root: non_mem_roots[0],
         ext_data_hash_be: ext_data_hash.try_into().map_err(|_| anyhow!("ext_data_hash != 32"))?,
     })
 }

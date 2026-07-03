@@ -51,7 +51,7 @@ fun ProofScreen(
     amount: String,
     recipient: String,
     runProof: suspend (advance: (Int) -> Unit) -> String,
-    onDone: (String) -> Unit,
+    onDone: (hash: String, proofMs: Long?) -> Unit,
     onCancel: () -> Unit,
     title: String = "Sending privately",
     isPublic: Boolean = false,
@@ -61,18 +61,28 @@ fun ProofScreen(
     // 0..4 — index of the first not-yet-done step (4 == all done).
     var current by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
+    val haptics = rememberHaptics()
 
     LaunchedEffect(Unit) {
         try {
             current = 1
+            // Proving starts as soon as we hand control to runProof (step 1 =
+            // assembled is instantaneous vs. the actual prove); stop the clock
+            // when advance(2) fires (2=proved) to time just the ZK proving step.
+            val proveStart = android.os.SystemClock.elapsedRealtime()
+            var proofMs: Long? = null
             // runProof drives the real pipeline and reports step progress
             // (1=assembled, 2=proved, 3=submitted); returns the tx hash.
-            val txHash = runProof { step -> current = step }
+            val txHash = runProof { step ->
+                if (step == 2 && proofMs == null) proofMs = android.os.SystemClock.elapsedRealtime() - proveStart
+                current = step
+            }
             current = 4
             kotlinx.coroutines.delay(300)
-            onDone(txHash)
+            onDone(txHash, proofMs)
         } catch (e: Exception) {
             error = e.message ?: "Submission failed"
+            haptics.reject()
         }
     }
 

@@ -1,0 +1,96 @@
+[workspace]
+members = [
+    "app/crates/core/disclosure",
+    "app/crates/core/prover",
+    "app/crates/core/types",
+    "circuit-keys",
+    "circuits",
+    "poseidon2",
+    "tools/ceremony-cli",
+]
+resolver = "3"
+
+# This is a trimmed-down, self-contained workspace for the crates vendored
+# from https://github.com/NethermindEth/stellar-private-payments (branch
+# 4in2out, rev 5826b32b5ed98e19cd9eafed1bbc1a1682e3a76f). It exists so the
+# vendored Cargo.toml files (which use `*.workspace = true` inheritance) can
+# still resolve `[workspace.package]` / `[workspace.dependencies]` without
+# needing the full upstream repo. The parent wallet workspace patches these
+# crates in via `[patch."https://github.com/NethermindEth/stellar-private-payments"]`
+# in /home/yash/private-payments-wallet/Cargo.toml.
+#
+# Excluded on purpose (not needed by prover-ffi / fixture-gen / relayer):
+# app/crates/core/{state,stellar,tx-planner,witness}, app/crates/platforms/web,
+# e2e-tests, the wasmer/cranelift-control patch.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/NethermindEth/stellar-private-transactions"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+anyhow = { version = "1", default-features = false }
+ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] }
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
+ark-ff = { version = "0.6.0", default-features = false }
+ark-groth16 = { version = "0.6.0", default-features = false }
+ark-relations = { version = "0.6.0", default-features = false }
+ark-serialize = { version = "0.6.0", default-features = false }
+ark-snark = { version = "0.6.0", default-features = false }
+ark-std = { version = "0.6.0", default-features = false, features = ["std"] }
+asp-membership = { path = "contracts/asp-membership" }
+asp-non-membership = { path = "contracts/asp-non-membership" }
+async-trait = { version = "0.1.89", default-features = false }
+cfg-if = { version = "1", default-features = false }
+circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+circuit-keys = { path = "circuit-keys" }
+circuits = { path = "circuits", default-features = false }
+contract-types = { path = "contracts/types" }
+disclosure = { path = "app/crates/core/disclosure" }
+getrandom = { version = "0.2", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
+num-integer = { version = "0.1.46", default-features = false }
+pool = { path = "contracts/pool" }
+prover = { path = "app/crates/core/prover" }
+rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
+soroban-sdk = { version = "26", default-features = false, features = ["hazmat"] }
+soroban-utils = { path = "contracts/soroban-utils" }
+thiserror = { version = "2", default-features = false }
+types = { path = "app/crates/core/types" }
+uint = { version = "0.10", default-features = false }
+zkhash = { path = "poseidon2" }
+
+[workspace.lints.rust]
+missing_docs = "allow"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+arithmetic_side_effects = "deny"
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss = "deny"
+needless_return = "deny"
+panicking_overflow_checks = "deny"
+unwrap_used = "deny"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

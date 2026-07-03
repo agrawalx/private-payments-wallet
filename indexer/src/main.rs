@@ -28,13 +28,13 @@ struct Config {
 impl Config {
     fn from_env() -> Self {
         let env = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
-        // Deployed testnet contracts (deployments/testnet/deployments.json) —
-        // override with INDEXER_CONTRACTS once our own contracts are deployed.
+        // Our deployed testnet contracts (fresh pool + ASP membership +
+        // ASP non-membership) — override with INDEXER_CONTRACTS if redeployed.
         let contracts = env(
             "INDEXER_CONTRACTS",
-            "CDQRXOD6VHFR5W34HMDLQNROGXA64DPI6BCU6M5JVA2GARDVHAMS2PZF,\
-             CBULZZIAHWL33XD5OBL2LBPYSFBYCNCOCIJITGJ74OSRRA7IZKIUBTKN,\
-             CDREZXZILERCSD7VMS4SKVRQY4FNIYJCTYA2AY4TKFRV6Y3L3M2OK3O3",
+            "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC,\
+             CBAC6AKBPK325WFTWXS3QRYBIDEFUGPC3ZZXMOW3JVTA4F5QSFRI5LF2,\
+             CDS5Q4CFZXTFQCTKKYKXROLWVEIM4IBQZFLL3YBDITD3ZOU5SSSRW2GN",
         )
         .split(',')
         .map(|s| s.trim().to_string())
@@ -47,7 +47,7 @@ impl Config {
                 "postgres://indexer:indexer@localhost:5434/indexer",
             ),
             contracts,
-            start_ledger: env("INDEXER_START_LEDGER", "3119336").parse().unwrap_or(0),
+            start_ledger: env("INDEXER_START_LEDGER", "3402000").parse().unwrap_or(0),
             poll_interval: Duration::from_secs(env("INDEXER_POLL_SECS", "5").parse().unwrap_or(5)),
             bind: env("INDEXER_BIND", "0.0.0.0:8080"),
             page_size: env("INDEXER_PAGE_SIZE", "200").parse().unwrap_or(200),

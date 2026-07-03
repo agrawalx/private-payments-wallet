@@ -63,6 +63,7 @@ fun ModeSlider(mode: WalletMode, onChange: (WalletMode, Offset) -> Unit, modifie
     )
     val shape = RoundedCornerShape(50)
     var bounds by remember { mutableStateOf<Rect?>(null) }
+    val haptics = rememberHaptics()
 
     fun anchorFor(public: Boolean): Offset {
         val b = bounds ?: return Offset.Zero
@@ -79,8 +80,8 @@ fun ModeSlider(mode: WalletMode, onChange: (WalletMode, Offset) -> Unit, modifie
             .border(1.dp, Umbra.Border, shape)
             .pointerInput(isPublic) {
                 detectHorizontalDragGestures { _, dragAmount ->
-                    if (dragAmount > 8f && !isPublic) onChange(WalletMode.Public, anchorFor(true))
-                    else if (dragAmount < -8f && isPublic) onChange(WalletMode.Shielded, anchorFor(false))
+                    if (dragAmount > 8f && !isPublic) { haptics.tick(); onChange(WalletMode.Public, anchorFor(true)) }
+                    else if (dragAmount < -8f && isPublic) { haptics.tick(); onChange(WalletMode.Shielded, anchorFor(false)) }
                 }
             },
     ) {
@@ -97,8 +98,8 @@ fun ModeSlider(mode: WalletMode, onChange: (WalletMode, Offset) -> Unit, modifie
                 .background(Umbra.Primary),
         )
         Row(Modifier.fillMaxSize()) {
-            Segment("Public", Icons.Filled.WbSunny, isPublic, Modifier.weight(1f)) { onChange(WalletMode.Public, anchorFor(true)) }
-            Segment("Shielded", Icons.Filled.Lock, !isPublic, Modifier.weight(1f)) { onChange(WalletMode.Shielded, anchorFor(false)) }
+            Segment("Public", Icons.Filled.WbSunny, isPublic, Modifier.weight(1f)) { haptics.tick(); onChange(WalletMode.Public, anchorFor(true)) }
+            Segment("Shielded", Icons.Filled.Lock, !isPublic, Modifier.weight(1f)) { haptics.tick(); onChange(WalletMode.Shielded, anchorFor(false)) }
         }
     }
 }

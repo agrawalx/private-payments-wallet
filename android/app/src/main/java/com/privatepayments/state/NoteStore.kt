@@ -19,6 +19,14 @@ data class StoredNote(
      * are surfaced as "Transferred" regardless. Used only for the activity label.
      */
     val kind: String = "received",
+    /** Ledger close time (ISO instant) this note's commitment was scanned at. */
+    val createdAt: String = "",
+    /** Ledger close time (ISO instant) this note's nullifier was seen at, once spent. */
+    val spentAt: String = "",
+    /** True if this note's creating tx also spent one of our own note
+     *  nullifiers — i.e. it's change from a transfer we sent, not a genuine
+     *  incoming payment. See the poll loop's spend-netting in MainActivity. */
+    val isChange: Boolean = false,
 )
 
 /**
@@ -36,7 +44,7 @@ data class StoredNote(
  * then `SUM(amount) WHERE NOT spent`.
  */
 class NoteStore(context: Context, accountIndex: Int = 0) :
-    SQLiteOpenHelper(context, "stella_state_$accountIndex.db", null, 3) {
+    SQLiteOpenHelper(context, "stella_state_$accountIndex.db", null, 5) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -47,16 +55,22 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                  nullifier  TEXT NOT NULL,
                  blinding   TEXT NOT NULL,
                  spent      INTEGER NOT NULL DEFAULT 0,
-                 kind       TEXT NOT NULL DEFAULT 'received'
+                 kind       TEXT NOT NULL DEFAULT 'received',
+                 created_at TEXT NOT NULL DEFAULT '',
+                 spent_at   TEXT NOT NULL DEFAULT '',
+                 is_change  INTEGER NOT NULL DEFAULT 0
                )"""
         )
-        db.execSQL("CREATE TABLE seen_nullifiers(nullifier TEXT PRIMARY KEY)")
+        db.execSQL("CREATE TABLE seen_nullifiers(nullifier TEXT PRIMARY KEY, closed_at TEXT NOT NULL DEFAULT '')")
         // Blindings of notes WE created by depositing — lets us label them
         // "Deposit" (vs "Received") once they're scanned back in.
         db.execSQL("CREATE TABLE my_deposits(blinding TEXT PRIMARY KEY)")
         db.execSQL("CREATE INDEX idx_notes_nullifier ON user_notes(nullifier)")
     }
 
+    // Dev phase — notes are just a local cache of what's already scannable
+    // on-chain, so drop-recreate is fine; a rescan repopulates everything
+    // (including the new timestamp columns) with no data actually lost.
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
         db.execSQL("DROP TABLE IF EXISTS user_notes")
         db.execSQL("DROP TABLE IF EXISTS seen_nullifiers")
@@ -65,8 +79,9 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
     }
 
     /** Insert a scanned note (idempotent by leaf index; never clobbers `spent`). */
-    fun upsertNote(leafIndex: Long, commitment: String, amount: Long, nullifier: String, blinding: String) {
-        writableDatabase.insertWithOnConflict(
+    fun upsertNote(leafIndex: Long, commitment: String, amount: Long, nullifier: String, blinding: String, createdAt: String, isChange: Boolean = false) {
+        val db = writableDatabase
+        db.insertWithOnConflict(
             "user_notes",
             null,
             ContentValues().apply {
@@ -75,21 +90,30 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                 put("amount", amount)
                 put("nullifier", nullifier)
                 put("blinding", blinding)
+                put("created_at", createdAt)
+                put("is_change", if (isChange) 1 else 0)
             },
             SQLiteDatabase.CONFLICT_IGNORE,
         )
+        // CONFLICT_IGNORE above no-ops on a re-scan of an already-known leaf, so
+        // backfill created_at for rows inserted before timestamps existed.
+        db.execSQL(
+            "UPDATE user_notes SET created_at = ? WHERE leaf_index = ? AND created_at = ''",
+            arrayOf(createdAt, leafIndex.toString()),
+        )
     }
 
-    /** Record nullifiers observed on-chain (idempotent). */
-    fun addNullifiers(nullifiers: Collection<String>) {
+    /** Record nullifiers observed on-chain (idempotent), paired with the ledger
+     *  close time each was seen at. */
+    fun addNullifiers(nullifiers: Collection<Pair<String, String>>) {
         val db = writableDatabase
         db.beginTransaction()
         try {
-            for (n in nullifiers) {
+            for ((n, closedAt) in nullifiers) {
                 db.insertWithOnConflict(
                     "seen_nullifiers",
                     null,
-                    ContentValues().apply { put("nullifier", n) },
+                    ContentValues().apply { put("nullifier", n); put("closed_at", closedAt) },
                     SQLiteDatabase.CONFLICT_IGNORE,
                 )
             }
@@ -120,11 +144,20 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                WHERE kind <> 'deposit'
                  AND blinding IN (SELECT blinding FROM my_deposits)"""
         )
-        return db.compileStatement(
+        val newlySpent = db.compileStatement(
             """UPDATE user_notes SET spent = 1
                WHERE spent = 0
                  AND nullifier IN (SELECT nullifier FROM seen_nullifiers)"""
         ).executeUpdateDelete()
+        // Backfill spent_at from the matching seen_nullifiers.closed_at, for any
+        // spent note that doesn't have one yet.
+        db.execSQL(
+            """UPDATE user_notes SET spent_at = (
+                 SELECT closed_at FROM seen_nullifiers WHERE seen_nullifiers.nullifier = user_notes.nullifier
+               )
+               WHERE spent = 1 AND spent_at = ''"""
+        )
+        return newlySpent
     }
 
     /** Unspent shielded balance, in stroops. */
@@ -136,12 +169,17 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
     /** All notes, newest leaf first (for activity + coin selection). */
     fun notes(): List<StoredNote> =
         readableDatabase.rawQuery(
-            "SELECT leaf_index, commitment, amount, nullifier, blinding, spent, kind FROM user_notes ORDER BY leaf_index DESC",
+            "SELECT leaf_index, commitment, amount, nullifier, blinding, spent, kind, created_at, spent_at, is_change FROM user_notes ORDER BY leaf_index DESC",
             null,
         ).use { c ->
             buildList {
                 while (c.moveToNext()) {
-                    add(StoredNote(c.getLong(0), c.getString(1), c.getLong(2), c.getString(3), c.getString(4), c.getInt(5) != 0, c.getString(6)))
+                    add(
+                        StoredNote(
+                            c.getLong(0), c.getString(1), c.getLong(2), c.getString(3), c.getString(4),
+                            c.getInt(5) != 0, c.getString(6), c.getString(7), c.getString(8), c.getInt(9) != 0,
+                        ),
+                    )
                 }
             }
         }
@@ -172,7 +210,10 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                     .put("nullifier", n.nullifier)
                     .put("blinding", n.blinding)
                     .put("spent", n.spent)
-                    .put("kind", n.kind),
+                    .put("kind", n.kind)
+                    .put("created_at", n.createdAt)
+                    .put("spent_at", n.spentAt)
+                    .put("is_change", n.isChange),
             )
         }
         return org.json.JSONObject().put("version", 1).put("notes", arr).toString()
@@ -197,6 +238,9 @@ class NoteStore(context: Context, accountIndex: Int = 0) :
                         put("blinding", o.getString("blinding"))
                         put("spent", if (o.optBoolean("spent")) 1 else 0)
                         put("kind", o.optString("kind", "received"))
+                        put("created_at", o.optString("created_at", ""))
+                        put("spent_at", o.optString("spent_at", ""))
+                        put("is_change", if (o.optBoolean("is_change")) 1 else 0)
                     },
                     SQLiteDatabase.CONFLICT_REPLACE,
                 )

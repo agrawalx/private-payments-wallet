@@ -90,10 +90,10 @@ fun AmountScreen(
         }
         Spacer(Modifier.height(8.dp))
         if (maxStroops != null) {
-            val maxXlm = maxStroops / 1e7
+            val maxXlm = xlm(maxStroops)
             Text(
-                if (overCap) "Over the limit. One payment spends at most 2 notes — max %.4f XLM. Send less or deposit more.".format(maxXlm)
-                else "Max in one payment: %.4f XLM · the pool spends at most 2 notes per transaction".format(maxXlm),
+                if (overCap) "Over the limit. One payment spends at most 2 notes — max $maxXlm XLM. Send less or deposit more."
+                else "Max in one payment: $maxXlm XLM · the pool spends at most 2 notes per transaction",
                 color = if (overCap) Umbra.Error else Umbra.TextFaint, fontSize = 12.sp, lineHeight = 17.sp,
             )
         } else {
@@ -105,17 +105,21 @@ fun AmountScreen(
             Text(recipientLabel, color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(10.dp))
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Umbra.Surface).padding(14.dp)) {
-                BasicTextField(
-                    value = recipient,
-                    onValueChange = { recipient = it.trim() },
-                    textStyle = TextStyle(color = Umbra.TextPrimary, fontFamily = Umbra.Mono, fontSize = 14.sp),
-                    cursorBrush = SolidColor(accent), singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { inner ->
-                        if (recipient.isEmpty()) Text(recipientHint, color = Umbra.TextFaint, fontFamily = Umbra.Mono, fontSize = 14.sp)
-                        inner()
-                    },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BasicTextField(
+                        value = recipient,
+                        onValueChange = { recipient = it.trim() },
+                        textStyle = TextStyle(color = Umbra.TextPrimary, fontFamily = Umbra.Mono, fontSize = 14.sp),
+                        cursorBrush = SolidColor(accent), singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            if (recipient.isEmpty()) Text(recipientHint, color = Umbra.TextFaint, fontFamily = Umbra.Mono, fontSize = 14.sp)
+                            inner()
+                        },
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    ScanIconButton { scanned -> recipient = scanned.trim() }
+                }
             }
             if (myAddresses.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
@@ -137,7 +141,7 @@ fun AmountScreen(
                             ) { Text(label, color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                if (addr.length > 12) "${addr.take(5)}…${addr.takeLast(4)}" else addr,
+                                shortAddress(addr, 5, 4),
                                 color = Umbra.TextSecondary, fontFamily = Umbra.Mono, fontSize = 11.sp,
                             )
                         }

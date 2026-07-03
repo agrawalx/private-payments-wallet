@@ -1,0 +1,22 @@
+[Unit]
+Description=Private Payments Indexer
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/pp
+# Contract IDs + start ledger are compiled defaults (fresh pool/ASP), but can
+# be overridden here without a rebuild.
+Environment=INDEXER_BIND=127.0.0.1:8080
+Environment=DATABASE_URL=postgres://indexer:indexer@localhost:5434/indexer
+Environment=INDEXER_RPC_URL=https://soroban-testnet.stellar.org
+Environment=INDEXER_START_LEDGER=3402000
+# Environment=INDEXER_CONTRACTS=CCB7ORVJ...,CBAC6AKB...,CDS5Q4CF...
+ExecStart=/opt/pp/bin/indexer
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

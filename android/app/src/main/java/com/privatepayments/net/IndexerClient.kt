@@ -6,11 +6,23 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** One `new_commitment_event`, tagged with the indexer `seq`. topic is the
- *  commitment (U256), value carries `index` + `encrypted_output`. Both base64-XDR. */
-data class CommitmentEvent(val seq: Long, val commitmentTopic: String, val value: String)
+ *  commitment (U256), value carries `index` + `encrypted_output`. Both base64-XDR.
+ *  `closedAt` is the ledger's close time (ISO instant) — the wall-clock
+ *  timestamp for this commitment, used to date deposits/receives in Activity.
+ *  `eventId` is the indexer's toid-based `event_id`; events from the same tx
+ *  share the prefix before the final dash-separated component, which is how
+ *  spend-netting (change detection) pairs a new commitment with the nullifiers
+ *  spent in the same transaction. */
+data class CommitmentEvent(val seq: Long, val eventId: String, val commitmentTopic: String, val value: String, val closedAt: String)
 
 /** One ASP `LeafAdded`, tagged with `seq`. value is the base64-XDR leaf. */
 data class LeafEvent(val seq: Long, val value: String)
+
+/** topic[1] (base64-XDR `ScVal::U256`) of one `new_nullifier_event`, paired
+ *  with the ledger close time it was recorded at (used as the spend date).
+ *  `eventId` lets this be matched against a same-tx [CommitmentEvent] for
+ *  change detection (see [CommitmentEvent.eventId]). */
+data class NullifierEvent(val seq: Long, val eventId: String, val topic: String, val closedAt: String)
 
 /**
  * The **delta** of events newer than the caller's cursor. The wallet persists
@@ -24,8 +36,7 @@ data class IndexerDelta(
     /** Count of new events this fetch (for the status line). */
     val newCount: Int = 0,
     val commitments: List<CommitmentEvent> = emptyList(),
-    /** topic[1] (base64-XDR `ScVal::U256`) of each new `new_nullifier_event`. */
-    val nullifierTopics: List<String> = emptyList(),
+    val nullifiers: List<NullifierEvent> = emptyList(),
     val leaves: List<LeafEvent> = emptyList(),
     val error: String? = null,
 )
@@ -37,7 +48,7 @@ data class IndexerDelta(
  * into the state/scanning layer; here it proves the app ↔ indexer wire.
  */
 object IndexerClient {
-    private const val BASE = "http://127.0.0.1:8080"
+    private val BASE = Endpoints.INDEXER_BASE
 
     /**
      * Fetch every event with `seq > sinceCursor`, paging until exhausted. A
@@ -47,7 +58,7 @@ object IndexerClient {
      */
     fun fetchSince(sinceCursor: Long): IndexerDelta = try {
         val commitments = mutableListOf<CommitmentEvent>()
-        val nullifierTopics = mutableListOf<String>()
+        val nullifiers = mutableListOf<NullifierEvent>()
         val leaves = mutableListOf<LeafEvent>()
         var total = 0
         var cursor = sinceCursor
@@ -63,12 +74,14 @@ object IndexerClient {
             for (i in 0 until n) {
                 val e = events.getJSONObject(i)
                 val seq = e.optLong("seq")
+                val eventId = e.optString("event_id")
                 val topics = e.getJSONArray("topic")
+                val closedAt = e.optString("ledger_closed_at")
                 when (decodeSymbol(topics.optString(0))) {
                     "new_commitment_event" ->
-                        commitments.add(CommitmentEvent(seq, topics.optString(1), e.optString("value")))
+                        commitments.add(CommitmentEvent(seq, eventId, topics.optString(1), e.optString("value"), closedAt))
                     "new_nullifier_event" ->
-                        nullifierTopics.add(topics.optString(1))
+                        nullifiers.add(NullifierEvent(seq, eventId, topics.optString(1), closedAt))
                     "LeafAdded" ->
                         leaves.add(LeafEvent(seq, e.optString("value")))
                 }
@@ -81,7 +94,7 @@ object IndexerClient {
         }
         IndexerDelta(
             reachable = true, newCursor = cursor, newCount = total,
-            commitments = commitments, nullifierTopics = nullifierTopics, leaves = leaves,
+            commitments = commitments, nullifiers = nullifiers, leaves = leaves,
         )
     } catch (e: Exception) {
         IndexerDelta(reachable = false, newCursor = sinceCursor, error = e.message)

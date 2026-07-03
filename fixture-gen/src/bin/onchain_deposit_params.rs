@@ -31,8 +31,18 @@ use zkhash::{
 };
 
 const LEVELS: usize = 10;
-const POOL: &str = "CCDFQ5D32OZVSK5BMNZMWZSY4U6VVJBHW4MEHEUCZOURZIP3C7UUJW4V";
+const POOL: &str = "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC";
 const DEPOSIT_STROOPS: i128 = 1_000_000; // 0.1 XLM
+
+// Live ASP membership tree leaves at CBAC6AKBPK325WFTWXS3QRYBIDEFUGPC3ZZXMOW3JVTA4F5QSFRI5LF2,
+// on-chain leaf order (indices 0,1,2), snapshotted from the hosted indexer
+// (`curl http://52.66.141.112/events?cursor=0&limit=300`, decoded via
+// `decode_asp_leaf`) on 2026-07-03. Index 2 is our scalar-102 test leaf.
+const ASP_LEAVES: [&str; 3] = [
+    "9994517823975672122284466930373335370852567112864722324125744549747666024239",
+    "2265510885976041928383517713406139983991156639540722924781593281193278186508",
+    "17969525783030368157502924498519760117548348265060813172074119923679683982433",
+];
 
 fn field_from_scalar(s: Scalar) -> Field {
     let mut b = s.into_bigint().to_bytes_le();
@@ -50,6 +60,9 @@ fn field_from_bigint(b: &BigInt) -> Field {
     bytes.resize(32, 0);
     Field::try_from_le_bytes(bytes.try_into().unwrap()).unwrap()
 }
+fn scalar_from_dec(s: &str) -> Scalar {
+    Scalar::from(s.parse::<BigUint>().unwrap())
+}
 
 fn main() -> Result<()> {
     // Deposit note key (its membership leaf is already inserted on-chain).
@@ -62,17 +75,26 @@ fn main() -> Result<()> {
     // App's X25519 encryption key (same dummy 64-byte signature the app uses)
     // so the wallet can decrypt the deposited output note.
     let sig = KeyDerivationSignature((0..64u8).collect());
-    let (_note_kp, enc_kp) = derive_encryption_and_note_keypairs(sig)?;
+    let (_note_kp, enc_kp, _nk) = derive_encryption_and_note_keypairs(sig)?;
     let enc_pub = EncryptionPublicKey(enc_kp.public.0);
 
-    // Membership proof: path to our leaf at index 0 of the (otherwise empty) tree.
+    // Membership proof: path to our leaf, now at index 2 of the live tree
+    // (indices 0,1 are other on-chain LeafAdded events; see ASP_LEAVES above).
     let blinding = Field::try_from_le_bytes([0u8; 32])?;
     let leaf = asp_membership_leaf(&note_pub, &blinding)?;
+    assert_eq!(scalar_to_bigint(scalar_from_field(&leaf)).to_string(), ASP_LEAVES[2], "scalar-102 leaf != live index 2");
     let zl = scalar_from_be(&zero_leaf());
     let mut leaves = vec![zl; 1usize << LEVELS];
-    leaves[0] = scalar_from_field(&leaf);
+    leaves[0] = scalar_from_dec(ASP_LEAVES[0]);
+    leaves[1] = scalar_from_dec(ASP_LEAVES[1]);
+    leaves[2] = scalar_from_field(&leaf);
     let mem_root = merkle_root(leaves.clone());
-    let (siblings, path_idx, depth) = merkle_proof(&leaves, 0);
+    assert_eq!(
+        scalar_to_bigint(mem_root).to_string(),
+        "7650851037732131397668132823701172848267506844599464976150678500985807912790",
+        "recomputed mem_root != live on-chain ASP root"
+    );
+    let (siblings, path_idx, depth) = merkle_proof(&leaves, 2);
     assert_eq!(depth, LEVELS);
     let membership = AspMembershipProof {
         leaf,

@@ -1,0 +1,26 @@
+[package]
+name = "pool"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+
+contract-types.workspace = true
+soroban-sdk.workspace = true
+soroban-utils.workspace = true
+
+[dev-dependencies]
+asp-membership = { workspace = true }
+asp-non-membership = { workspace = true }
+circom-groth16-verifier = { workspace = true }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[lints]
+workspace = true

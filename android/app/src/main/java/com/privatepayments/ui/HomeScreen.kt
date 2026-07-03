@@ -34,6 +34,10 @@ import com.privatepayments.ui.theme.elevatedCard
 import com.privatepayments.ui.theme.umbraScreen
 import kotlinx.coroutines.launch
 
+/** What kind of event an [Activity] row represents — drives grouping/labels
+ *  beyond the free-text `title`. */
+enum class ActivityKind { Deposit, Received, Transferred, Change, PublicSent, PublicReceived }
+
 data class Activity(
     val icon: ImageVector,
     val title: String,
@@ -44,6 +48,13 @@ data class Activity(
     val subtitle: String? = null,
     /** stellar.expert link for this tx, if known (public activity only). */
     val url: String? = null,
+    val kind: ActivityKind = ActivityKind.Received,
+    /** Full ISO timestamp, when known (shielded notes may not have one yet). */
+    val timestamp: String? = null,
+    val txHash: String? = null,
+    val leafIndex: Long? = null,
+    val commitment: String? = null,
+    val pending: Boolean = false,
 )
 
 /** The three bottom-nav destinations that live "inside" Home (Settings is a
@@ -57,7 +68,7 @@ fun HomeScreen(
     balanceText: String,
     publicText: String,
     activity: List<Activity>,
-    syncStatus: String,
+    syncStatus: SyncStatus,
     onSend: () -> Unit,
     onDeposit: () -> Unit,
     onWithdraw: () -> Unit,
@@ -72,6 +83,9 @@ fun HomeScreen(
     onPublicSend: () -> Unit = {},
     publicActivity: List<Activity> = emptyList(),
     onSelectTab: (HomeTab) -> Unit = {},
+    onActivityTap: (Activity) -> Unit = {},
+    onRetrySync: () -> Unit = {},
+    initialSyncing: Boolean = false,
 ) {
     var revealed by remember { mutableStateOf(false) }
     val isPublic = mode == WalletMode.Public
@@ -92,7 +106,7 @@ fun HomeScreen(
             Spacer(Modifier.height(14.dp))
             ModeSlider(mode, onModeChange, Modifier.align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(14.dp))
-            SyncBanner(syncStatus)
+            SyncBanner(syncStatus, onRetrySync)
             // The mode switch's visual transition is a circular reveal wrapping
             // this whole tab family (see MainActivity's ModeReveal) — this branch
             // just snaps to whichever face is active, no local animation needed.
@@ -111,7 +125,7 @@ fun HomeScreen(
                     RegisterBanner(onRegister)
                 }
                 Spacer(Modifier.height(14.dp))
-                BalanceCard(revealed, balanceText) { revealed = !revealed }
+                BalanceCard(revealed, balanceText, initialSyncing) { revealed = !revealed }
                 Spacer(Modifier.height(20.dp))
                 ActionRow(onSend = onSend, onDeposit = onDeposit, onWithdraw = onWithdraw, onReceive = onReceive)
                 Spacer(Modifier.height(14.dp))
@@ -121,7 +135,9 @@ fun HomeScreen(
             ActivityHeader(onSeeAll = { onSelectTab(HomeTab.Activity) })
             Spacer(Modifier.height(8.dp))
             val shown = if (isPublic) publicActivity else activity
-            if (shown.isEmpty()) {
+            if (shown.isEmpty() && initialSyncing) {
+                repeat(3) { ShimmerRow(); Spacer(Modifier.height(6.dp)) }
+            } else if (shown.isEmpty()) {
                 Text(
                     if (isPublic) "No public payments yet" else "No shielded notes yet",
                     color = Umbra.TextFaint, fontSize = 13.sp,
@@ -129,24 +145,11 @@ fun HomeScreen(
                 )
             } else {
                 // Preview only — "See all" / the Activity tab has the full list.
-                shown.take(5).forEach { ActivityRow(it); Spacer(Modifier.height(6.dp)) }
+                shown.take(5).forEach { ActivityRow(it, onActivityTap); Spacer(Modifier.height(6.dp)) }
             }
             Spacer(Modifier.height(24.dp))
         }
         BottomNav(HomeTab.Home, onSelectTab, onSettings)
-    }
-}
-
-@androidx.compose.runtime.Composable
-private fun SyncBanner(status: String) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(Umbra.SurfaceElevated).padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(7.dp).clip(CircleShape).background(Umbra.Success))
-        Spacer(Modifier.width(10.dp))
-        Text(status, color = Umbra.TextMuted, fontSize = 12.sp)
     }
 }
 
@@ -223,7 +226,7 @@ private fun ShareProofButton(onClick: () -> Unit) {
 @androidx.compose.runtime.Composable
 internal fun TopBar(address: String, accountLabel: String, isPublic: Boolean, onOpenWallet: () -> Unit) {
     val ctx = LocalContext.current
-    val short = if (address.length > 12) "${address.take(6)}…${address.takeLast(4)}" else address
+    val short = shortAddress(address)
     Column {
         // Avatar (active account) left · network centered · settings right.
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -269,7 +272,7 @@ internal fun TopBar(address: String, accountLabel: String, isPublic: Boolean, on
 }
 
 @androidx.compose.runtime.Composable
-private fun BalanceCard(revealed: Boolean, balanceText: String, onToggle: () -> Unit) {
+private fun BalanceCard(revealed: Boolean, balanceText: String, syncing: Boolean = false, onToggle: () -> Unit) {
     // Design's bordered balance card: dark purple gradient box + hairline, a small
     // "Shielded balance" label with an eye, a left-aligned number, and a glow that
     // pools in the top-right corner (by the eye) and fades inward.
@@ -301,11 +304,15 @@ private fun BalanceCard(revealed: Boolean, balanceText: String, onToggle: () -> 
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    if (revealed) balanceText else "••••••",
-                    color = Umbra.TextPrimary, fontFamily = Umbra.Display,
-                    fontSize = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp,
-                )
+                if (revealed && syncing && balanceText == "•.••••") {
+                    ShimmerBox(Modifier.width(140.dp).height(38.dp).clip(RoundedCornerShape(8.dp)))
+                } else {
+                    Text(
+                        if (revealed) balanceText else "••••••",
+                        color = Umbra.TextPrimary, fontFamily = Umbra.Display,
+                        fontSize = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("XLM", color = Umbra.TextFaint, fontSize = 18.sp, modifier = Modifier.padding(bottom = 6.dp))
             }
@@ -425,18 +432,30 @@ private fun ActivityHeader(onSeeAll: () -> Unit) {
 }
 
 @androidx.compose.runtime.Composable
-internal fun ActivityRow(a: Activity) {
+internal fun ActivityRow(a: Activity, onClick: ((Activity) -> Unit)? = null) {
     val ctx = LocalContext.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.Surface)
-            .then(if (a.url != null) Modifier.clickable { openUrl(ctx, a.url) } else Modifier)
+            .then(
+                when {
+                    onClick != null -> Modifier.clickable { onClick(a) }
+                    a.url != null -> Modifier.clickable { openUrl(ctx, a.url) }
+                    else -> Modifier
+                },
+            )
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(Umbra.SurfaceHi),
             contentAlignment = Alignment.Center,
-        ) { Icon(a.icon, null, tint = Umbra.TextSecondary, modifier = Modifier.size(20.dp)) }
+        ) {
+            if (a.pending) {
+                CircularProgressIndicator(Modifier.size(14.dp), color = Umbra.Warning, strokeWidth = 2.dp)
+            } else {
+                Icon(a.icon, null, tint = Umbra.TextSecondary, modifier = Modifier.size(20.dp))
+            }
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(a.title, color = Umbra.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
@@ -462,7 +481,14 @@ internal fun ActivityRow(a: Activity) {
                 fontFamily = Umbra.Display,
                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
             )
-            Text(a.time, color = Umbra.TextFaint, fontSize = 11.sp)
+            if (a.pending) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(999.dp)).background(Umbra.Warning.copy(alpha = 0.18f))
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                ) { Text("Pending", color = Umbra.Warning, fontSize = 10.sp, fontWeight = FontWeight.Medium) }
+            } else {
+                Text(a.time, color = Umbra.TextFaint, fontSize = 11.sp)
+            }
         }
         if (a.url != null) {
             Spacer(Modifier.width(8.dp))

@@ -32,7 +32,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-const DEFAULT_POOL_ID: &str = "CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU";
+const DEFAULT_POOL_ID: &str = "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC";
 const DEFAULT_RPC_URL: &str = "https://soroban-testnet.stellar.org";
 
 struct Cfg {

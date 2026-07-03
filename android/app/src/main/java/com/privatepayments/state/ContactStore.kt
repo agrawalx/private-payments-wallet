@@ -44,6 +44,10 @@ class ContactStore(context: Context) {
         save(list().filterNot { it.id == id })
     }
 
+    fun update(c: Contact) {
+        save(list().map { if (it.id == c.id) c else it })
+    }
+
     private fun save(contacts: List<Contact>) {
         val arr = JSONArray()
         contacts.forEach { c ->

@@ -777,6 +777,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -824,6 +830,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_build_withdraw_params(`fixtureJson`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`recipientG`: RustBuffer.ByValue,`inputs`: RustBuffer.ByValue,`commitmentTopicsB64`: RustBuffer.ByValue,`treeDepth`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_prover_ffi_fn_func_compute_note_nullifier(`nullifierKey`: RustBuffer.ByValue,`commitmentDec`: RustBuffer.ByValue,`leafIndex`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_current_pool_root(`commitmentTopicsB64`: RustBuffer.ByValue,`treeDepth`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_decode_asp_leaf(`valueB64`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -844,7 +852,9 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_note_public_key(`notePrivateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_prover_ffi_fn_func_prove_policy_tx_2_2_json(`inputsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_prover_ffi_fn_func_prove_policy_tx_4_2_json(`inputsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_prover_ffi_fn_func_prove_policy_tx_4_2_json_rapidsnark(`inputsJson`: RustBuffer.ByValue,`zkeyPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_rebuild_input_path(`paramsJson`: RustBuffer.ByValue,`commitmentTopicsB64`: RustBuffer.ByValue,`leafIndex`: Int,`amount`: RustBuffer.ByValue,`blinding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -858,6 +868,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_prover_ffi_fn_func_verify_proof_bundle(`bundle`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_prover_ffi_fn_func_warm_up_provers(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun ffi_prover_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_prover_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1002,6 +1014,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_prover_ffi_checksum_func_build_withdraw_params(
     ): Short
+    fun uniffi_prover_ffi_checksum_func_compute_note_nullifier(
+    ): Short
     fun uniffi_prover_ffi_checksum_func_current_pool_root(
     ): Short
     fun uniffi_prover_ffi_checksum_func_decode_asp_leaf(
@@ -1022,7 +1036,9 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_prover_ffi_checksum_func_note_public_key(
     ): Short
-    fun uniffi_prover_ffi_checksum_func_prove_policy_tx_2_2_json(
+    fun uniffi_prover_ffi_checksum_func_prove_policy_tx_4_2_json(
+    ): Short
+    fun uniffi_prover_ffi_checksum_func_prove_policy_tx_4_2_json_rapidsnark(
     ): Short
     fun uniffi_prover_ffi_checksum_func_rebuild_input_path(
     ): Short
@@ -1035,6 +1051,8 @@ internal interface UniffiLib : Library {
     fun uniffi_prover_ffi_checksum_func_verify_disclosure_receipt(
     ): Short
     fun uniffi_prover_ffi_checksum_func_verify_proof_bundle(
+    ): Short
+    fun uniffi_prover_ffi_checksum_func_warm_up_provers(
     ): Short
     fun ffi_prover_ffi_uniffi_contract_version(
     ): Int
@@ -1089,7 +1107,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_prover_ffi_checksum_func_build_signed_payment() != 25429.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_prover_ffi_checksum_func_build_transfer_params() != 32173.toShort()) {
+    if (lib.uniffi_prover_ffi_checksum_func_build_transfer_params() != 181.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_build_unsigned_asp_register() != 17231.toShort()) {
@@ -1098,7 +1116,10 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_prover_ffi_checksum_func_build_unsigned_transact() != 32664.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_prover_ffi_checksum_func_build_withdraw_params() != 55435.toShort()) {
+    if (lib.uniffi_prover_ffi_checksum_func_build_withdraw_params() != 60253.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_prover_ffi_checksum_func_compute_note_nullifier() != 52016.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_current_pool_root() != 7536.toShort()) {
@@ -1131,7 +1152,10 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_prover_ffi_checksum_func_note_public_key() != 54132.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_prover_ffi_checksum_func_prove_policy_tx_2_2_json() != 55041.toShort()) {
+    if (lib.uniffi_prover_ffi_checksum_func_prove_policy_tx_4_2_json() != 45935.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_prover_ffi_checksum_func_prove_policy_tx_4_2_json_rapidsnark() != 1617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_rebuild_input_path() != 24830.toShort()) {
@@ -1150,6 +1174,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_prover_ffi_checksum_func_verify_proof_bundle() != 15438.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_prover_ffi_checksum_func_warm_up_provers() != 23523.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1460,12 +1487,12 @@ public object FfiConverterTypeDisclosureReport: FfiConverterRustBuffer<Disclosur
 
 /**
  * Output of a transaction flow (deposit/withdraw/transfer): the circuit-input
- * JSON (feeds straight into [`prove_policy_tx_2_2_json`]) plus the ext-data the
+ * JSON (feeds straight into [`prove_policy_tx_4_2_json`]) plus the ext-data the
  * on-chain `transact` call needs.
  */
 data class FlowArtifacts (
     /**
-     * Circuit inputs as JSON — pass directly to `prove_policy_tx_2_2_json`.
+     * Circuit inputs as JSON — pass directly to `prove_policy_tx_4_2_json`.
      */
     var `circuitInputsJson`: kotlin.String, 
     /**
@@ -1614,7 +1641,13 @@ data class KeyBundle (
     /**
      * X25519 encryption public key (others encrypt notes to this).
      */
-    var `encryptionPublic`: kotlin.ByteArray
+    var `encryptionPublic`: kotlin.ByteArray, 
+    /**
+     * BN254 nullifier key (`nk`, Zcash-style split) — derived from
+     * `note_private`; lets its holder compute nullifiers for owned notes
+     * without granting spend authority.
+     */
+    var `nullifierKey`: kotlin.ByteArray
 ) {
     
     companion object
@@ -1630,6 +1663,7 @@ public object FfiConverterTypeKeyBundle: FfiConverterRustBuffer<KeyBundle> {
             FfiConverterByteArray.read(buf),
             FfiConverterByteArray.read(buf),
             FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
         )
     }
 
@@ -1637,7 +1671,8 @@ public object FfiConverterTypeKeyBundle: FfiConverterRustBuffer<KeyBundle> {
             FfiConverterByteArray.allocationSize(value.`notePrivate`) +
             FfiConverterByteArray.allocationSize(value.`notePublic`) +
             FfiConverterByteArray.allocationSize(value.`encryptionPrivate`) +
-            FfiConverterByteArray.allocationSize(value.`encryptionPublic`)
+            FfiConverterByteArray.allocationSize(value.`encryptionPublic`) +
+            FfiConverterByteArray.allocationSize(value.`nullifierKey`)
     )
 
     override fun write(value: KeyBundle, buf: ByteBuffer) {
@@ -1645,13 +1680,14 @@ public object FfiConverterTypeKeyBundle: FfiConverterRustBuffer<KeyBundle> {
             FfiConverterByteArray.write(value.`notePublic`, buf)
             FfiConverterByteArray.write(value.`encryptionPrivate`, buf)
             FfiConverterByteArray.write(value.`encryptionPublic`, buf)
+            FfiConverterByteArray.write(value.`nullifierKey`, buf)
     }
 }
 
 
 
 /**
- * Soroban-ready proof + public signals produced by [`prove_policy_tx_2_2`].
+ * Soroban-ready proof + public signals produced by [`prove_policy_tx_4_2`].
  */
 data class ProofBundle (
     /**
@@ -2239,7 +2275,7 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
     
 
         /**
-         * Build a private **transfer** params JSON: spend the selected notes (1–2) and
+         * Build a private **transfer** params JSON: spend the selected notes (1–4) and
          * create a note of `amount` for the recipient (`recipient_note_pub` +
          * `recipient_enc_pub`, `0x`-hex), change back to the sender. For a self-transfer
          * pass the sender's own pubkeys. Feeds `assemble_transfer`.
@@ -2288,7 +2324,7 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
 
         /**
          * Build a **withdraw** params JSON for an ARBITRARY amount + recipient, in-app.
-         * Spends the selected notes (1–2, the circuit's limit) against the live tree,
+         * Spends the selected notes (1–4, the circuit's limit) against the live tree,
          * withdraws `amount` to `recipient_g` (any public `G...`), and lets the flow
          * auto-compute the change note. ASP proofs come from the fixture (constant for
          * the owner key). Feeds `assemble_withdraw`.
@@ -2298,6 +2334,29 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
     uniffiRustCallWithError(ProverException) { _status ->
     UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_build_withdraw_params(
         FfiConverterString.lower(`fixtureJson`),FfiConverterString.lower(`amount`),FfiConverterString.lower(`recipientG`),FfiConverterSequenceTypeSelectedNote.lower(`inputs`),FfiConverterSequenceString.lower(`commitmentTopicsB64`),FfiConverterUInt.lower(`treeDepth`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Recompute a note's nullifier directly from its nullifier key (`nk`),
+         * mirroring `scan_note`'s nullifier recompute but without requiring the
+         * note's spend private key. Mirrors the circuit exactly:
+         * path_indices = leaf_index (LE in a field element)
+         * signature    = poseidon(nk, commitment, path_indices)        [domain 4]
+         * nullifier    = poseidon(commitment, path_indices, signature) [domain 2]
+         *
+         * `nullifier_key`: 32-byte LE `nk` (see `KeyBundle::nullifier_key`).
+         * `commitment_dec`: the note's commitment as a decimal string (same encoding
+         * `scan_note` derives from the on-chain topic).
+         * Returns the nullifier as a decimal string (same format `decode_nullifier_topic` emits).
+         */
+    @Throws(ProverException::class) fun `computeNoteNullifier`(`nullifierKey`: kotlin.ByteArray, `commitmentDec`: kotlin.String, `leafIndex`: kotlin.UInt): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(ProverException) { _status ->
+    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_compute_note_nullifier(
+        FfiConverterByteArray.lower(`nullifierKey`),FfiConverterString.lower(`commitmentDec`),FfiConverterUInt.lower(`leafIndex`),_status)
 }
     )
     }
@@ -2453,14 +2512,32 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
     
 
         /**
-         * Generate a `policy_tx_2_2` proof from a circuit-input JSON string.
+         * Generate a `policy_tx_4_2` proof from a circuit-input JSON string.
          * Returns the Soroban-ready proof bytes + public inputs.
          */
-    @Throws(ProverException::class) fun `provePolicyTx22Json`(`inputsJson`: kotlin.String): ProofBundle {
+    @Throws(ProverException::class) fun `provePolicyTx42Json`(`inputsJson`: kotlin.String): ProofBundle {
             return FfiConverterTypeProofBundle.lift(
     uniffiRustCallWithError(ProverException) { _status ->
-    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_prove_policy_tx_2_2_json(
+    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_prove_policy_tx_4_2_json(
         FfiConverterString.lower(`inputsJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Same as [`prove_policy_tx_4_2_json`], but proves with rapidsnark's native
+         * C++ prover instead of the cached arkworks `Prover` (Task B6). `zkey_path`
+         * is a filesystem path to `policy_tx_4_2_final.zkey` (~35MB, not embedded —
+         * Android callers copy the bundled asset to `filesDir` once, since assets
+         * aren't directly file-pathable, and pass that path). Only compiled with
+         * `--features rapidsnark`; the default build doesn't export this symbol.
+         */
+    @Throws(ProverException::class) fun `provePolicyTx42JsonRapidsnark`(`inputsJson`: kotlin.String, `zkeyPath`: kotlin.String): ProofBundle {
+            return FfiConverterTypeProofBundle.lift(
+    uniffiRustCallWithError(ProverException) { _status ->
+    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_prove_policy_tx_4_2_json_rapidsnark(
+        FfiConverterString.lower(`inputsJson`),FfiConverterString.lower(`zkeyPath`),_status)
 }
     )
     }
@@ -2565,6 +2642,20 @@ public object FfiConverterSequenceTypeSelectedNote: FfiConverterRustBuffer<List<
 }
     )
     }
+    
+
+        /**
+         * Pre-deserializes both embedded provers (policy + selective disclosure) so
+         * the first real proof skips the ~half of proof time spent loading keys.
+         * Idempotent and thread-safe.
+         */
+    @Throws(ProverException::class) fun `warmUpProvers`()
+        = 
+    uniffiRustCallWithError(ProverException) { _status ->
+    UniffiLib.INSTANCE.uniffi_prover_ffi_fn_func_warm_up_provers(
+        _status)
+}
+    
     
 
 

@@ -1,7 +1,7 @@
 
 //! `prover-ffi` — Milestone 0 vertical slice.
 //!
-//! One job: take a `policy_tx_2_2` circuit-input JSON, generate the witness
+//! One job: take a `policy_tx_4_2` circuit-input JSON, generate the witness
 //! natively (rust-witness), prove with the reference `prover` crate
 //! (ark-groth16, Wasmer-free), and return Soroban-ready proof bytes + public
 //! inputs. No wallet, no flows, no state — those come in Phase 2.
@@ -13,12 +13,15 @@
 //!               --> 256-byte A||B||C + public inputs
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context, Result};
 use num_bigint::{BigInt, Sign};
 use prover::prover::Prover;
 
 mod ext_data_hash;
+#[cfg(feature = "rapidsnark")]
+mod rapidsnark_backend;
 mod submit;
 mod wallet;
 
@@ -205,11 +208,26 @@ impl From<anyhow::Error> for ProverError {
 // Thin wrappers over the plain-Rust API below, with FFI-friendly signatures
 // (owned String in, Record out, ProverError instead of anyhow).
 
-/// Generate a `policy_tx_2_2` proof from a circuit-input JSON string.
+/// Generate a `policy_tx_4_2` proof from a circuit-input JSON string.
 /// Returns the Soroban-ready proof bytes + public inputs.
 #[uniffi::export]
-pub fn prove_policy_tx_2_2_json(inputs_json: String) -> Result<ProofBundle, ProverError> {
-    Ok(prove_policy_tx_2_2(&inputs_json)?)
+pub fn prove_policy_tx_4_2_json(inputs_json: String) -> Result<ProofBundle, ProverError> {
+    Ok(prove_policy_tx_4_2(&inputs_json)?)
+}
+
+/// Same as [`prove_policy_tx_4_2_json`], but proves with rapidsnark's native
+/// C++ prover instead of the cached arkworks `Prover` (Task B6). `zkey_path`
+/// is a filesystem path to `policy_tx_4_2_final.zkey` (~35MB, not embedded —
+/// Android callers copy the bundled asset to `filesDir` once, since assets
+/// aren't directly file-pathable, and pass that path). Only compiled with
+/// `--features rapidsnark`; the default build doesn't export this symbol.
+#[cfg(feature = "rapidsnark")]
+#[uniffi::export]
+pub fn prove_policy_tx_4_2_json_rapidsnark(
+    inputs_json: String,
+    zkey_path: String,
+) -> Result<ProofBundle, ProverError> {
+    Ok(rapidsnark_backend::prove_policy_tx_4_2_rapidsnark(&inputs_json, &zkey_path)?)
 }
 
 /// Verify a proof bundle locally against the embedded verifying key.
@@ -230,6 +248,10 @@ pub struct KeyBundle {
     pub encryption_private: Vec<u8>,
     /// X25519 encryption public key (others encrypt notes to this).
     pub encryption_public: Vec<u8>,
+    /// BN254 nullifier key (`nk`, Zcash-style split) — derived from
+    /// `note_private`; lets its holder compute nullifiers for owned notes
+    /// without granting spend authority.
+    pub nullifier_key: Vec<u8>,
 }
 
 /// Derive the note + encryption keypairs from a 64-byte Ed25519 signature.
@@ -245,22 +267,23 @@ pub fn derive_keys(signature: Vec<u8>) -> Result<KeyBundle, ProverError> {
         });
     }
     let sig = types::KeyDerivationSignature(signature);
-    let (note_kp, enc_kp) = prover::encryption::derive_encryption_and_note_keypairs(sig)
+    let (note_kp, enc_kp, nullifier_key) = prover::encryption::derive_encryption_and_note_keypairs(sig)
         .map_err(ProverError::from)?;
     Ok(KeyBundle {
         note_private: note_kp.private.0.to_vec(),
         note_public: note_kp.public.0.to_vec(),
         encryption_private: enc_kp.private.0.to_vec(),
         encryption_public: enc_kp.public.0.to_vec(),
+        nullifier_key,
     })
 }
 
 /// Output of a transaction flow (deposit/withdraw/transfer): the circuit-input
-/// JSON (feeds straight into [`prove_policy_tx_2_2_json`]) plus the ext-data the
+/// JSON (feeds straight into [`prove_policy_tx_4_2_json`]) plus the ext-data the
 /// on-chain `transact` call needs.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct FlowArtifacts {
-    /// Circuit inputs as JSON — pass directly to `prove_policy_tx_2_2_json`.
+    /// Circuit inputs as JSON — pass directly to `prove_policy_tx_4_2_json`.
     pub circuit_inputs_json: String,
     /// ext_data.recipient (Stellar address / contract id).
     pub ext_recipient: String,
@@ -454,12 +477,15 @@ pub fn scan_note(
 
     // Recompute the nullifier exactly as the circuit does:
     //   path_indices = leaf_index (LE in a field element)
-    //   signature    = poseidon(note_priv, commitment, path_indices)  [domain 4]
-    //   nullifier    = poseidon(commitment, path_indices, signature)  [domain 2]
+    //   nk           = poseidon(note_priv, 0)                        [domain 5]
+    //   signature    = poseidon(nk, commitment, path_indices)        [domain 4]
+    //   nullifier    = poseidon(commitment, path_indices, signature) [domain 2]
     let commitment_le = commitment.to_le_bytes();
     let mut path_indices_le = [0u8; 32];
     path_indices_le[..8].copy_from_slice(&u64::from(leaf_index).to_le_bytes());
-    let signature = prover::crypto::compute_signature(&note_private_key, &commitment_le, &path_indices_le)
+    let nullifier_key = prover::crypto::derive_nullifier_key(&note_private_key)
+        .map_err(ProverError::from)?;
+    let signature = prover::crypto::compute_signature(&nullifier_key, &commitment_le, &path_indices_le)
         .map_err(ProverError::from)?;
     let nullifier_le = prover::crypto::compute_nullifier(&commitment_le, &path_indices_le, &signature)
         .map_err(ProverError::from)?;
@@ -472,6 +498,51 @@ pub fn scan_note(
         commitment: commitment_dec,
         blinding: blinding_hex,
     }))
+}
+
+/// Recompute a note's nullifier directly from its nullifier key (`nk`),
+/// mirroring `scan_note`'s nullifier recompute but without requiring the
+/// note's spend private key. Mirrors the circuit exactly:
+///   path_indices = leaf_index (LE in a field element)
+///   signature    = poseidon(nk, commitment, path_indices)        [domain 4]
+///   nullifier    = poseidon(commitment, path_indices, signature) [domain 2]
+///
+/// `nullifier_key`: 32-byte LE `nk` (see `KeyBundle::nullifier_key`).
+/// `commitment_dec`: the note's commitment as a decimal string (same encoding
+/// `scan_note` derives from the on-chain topic).
+/// Returns the nullifier as a decimal string (same format `decode_nullifier_topic` emits).
+#[uniffi::export]
+pub fn compute_note_nullifier(
+    nullifier_key: Vec<u8>,
+    commitment_dec: String,
+    leaf_index: u32,
+) -> Result<String, ProverError> {
+    use num_bigint::BigUint;
+
+    if nullifier_key.len() != 32 {
+        return Err(ProverError::Failed { msg: "nullifier key must be 32 bytes".into() });
+    }
+
+    let commitment_be_vec = commitment_dec
+        .parse::<BigUint>()
+        .map_err(|e| ProverError::Failed { msg: format!("commitment decimal: {e}") })?
+        .to_bytes_be();
+    if commitment_be_vec.len() > 32 {
+        return Err(ProverError::Failed { msg: "commitment out of range".into() });
+    }
+    let mut commitment_be = [0u8; 32];
+    commitment_be[32 - commitment_be_vec.len()..].copy_from_slice(&commitment_be_vec);
+    let commitment = types::Field::try_from_be_bytes(commitment_be).map_err(ProverError::from)?;
+    let commitment_le = commitment.to_le_bytes();
+
+    let mut path_indices_le = [0u8; 32];
+    path_indices_le[..8].copy_from_slice(&u64::from(leaf_index).to_le_bytes());
+
+    let signature = prover::crypto::compute_signature(&nullifier_key, &commitment_le, &path_indices_le)
+        .map_err(ProverError::from)?;
+    let nullifier_le = prover::crypto::compute_nullifier(&commitment_le, &path_indices_le, &signature)
+        .map_err(ProverError::from)?;
+    Ok(BigUint::from_bytes_le(&nullifier_le).to_str_radix(10))
 }
 
 /// Decode a `NewNullifierEvent` topic[1] (`ScVal::U256`) to a decimal string,
@@ -735,7 +806,7 @@ pub struct SelectedNote {
 }
 
 /// Build a **withdraw** params JSON for an ARBITRARY amount + recipient, in-app.
-/// Spends the selected notes (1–2, the circuit's limit) against the live tree,
+/// Spends the selected notes (1–4, the circuit's limit) against the live tree,
 /// withdraws `amount` to `recipient_g` (any public `G...`), and lets the flow
 /// auto-compute the change note. ASP proofs come from the fixture (constant for
 /// the owner key). Feeds `assemble_withdraw`.
@@ -749,8 +820,8 @@ pub fn build_withdraw_params(
     tree_depth: u32,
 ) -> Result<String, ProverError> {
     use prover::merkle::MerklePrefixTree;
-    if inputs.is_empty() || inputs.len() > 2 {
-        return Err(ProverError::Failed { msg: format!("withdraw needs 1-2 input notes, got {}", inputs.len()) });
+    if inputs.is_empty() || inputs.len() > 4 {
+        return Err(ProverError::Failed { msg: format!("withdraw needs 1-4 input notes, got {}", inputs.len()) });
     }
     let mut v: serde_json::Value = serde_json::from_str(&fixture_json)
         .map_err(|e| ProverError::Failed { msg: format!("withdraw fixture JSON: {e}") })?;
@@ -780,7 +851,7 @@ pub fn build_withdraw_params(
     serde_json::to_string(&v).map_err(|e| ProverError::Failed { msg: format!("serialize: {e}") })
 }
 
-/// Build a private **transfer** params JSON: spend the selected notes (1–2) and
+/// Build a private **transfer** params JSON: spend the selected notes (1–4) and
 /// create a note of `amount` for the recipient (`recipient_note_pub` +
 /// `recipient_enc_pub`, `0x`-hex), change back to the sender. For a self-transfer
 /// pass the sender's own pubkeys. Feeds `assemble_transfer`.
@@ -796,8 +867,8 @@ pub fn build_transfer_params(
     tree_depth: u32,
 ) -> Result<String, ProverError> {
     use prover::merkle::MerklePrefixTree;
-    if inputs.is_empty() || inputs.len() > 2 {
-        return Err(ProverError::Failed { msg: format!("transfer needs 1-2 input notes, got {}", inputs.len()) });
+    if inputs.is_empty() || inputs.len() > 4 {
+        return Err(ProverError::Failed { msg: format!("transfer needs 1-4 input notes, got {}", inputs.len()) });
     }
     let send: u128 = amount.parse().map_err(|e| ProverError::Failed { msg: format!("bad amount: {e}") })?;
     let total: u128 = inputs.iter().map(|n| n.amount.parse::<u128>().unwrap_or(0)).sum();
@@ -905,8 +976,7 @@ struct DisclosureBundle {
 
 // VK bytes + hash for the embedded selectiveDisclosure_1 proving key.
 fn sd_vk() -> Result<(Vec<u8>, String)> {
-    let prover = prover::prover::Prover::new(SD_PROVING_KEY, SD_R1CS)
-        .map_err(|e| anyhow!("Prover::new: {e}"))?;
+    let prover = sd_prover().map_err(|e| anyhow!("{e}"))?;
     let vk = prover.get_verifying_key().map_err(|e| anyhow!("vk: {e}"))?;
     let hash = disclosure::vk_hash_hex(&vk);
     Ok((vk, hash))
@@ -1013,7 +1083,8 @@ pub fn issue_disclosure_receipt(
         .map_err(|e| ProverError::Failed { msg: format!("inputs json: {e}") })?;
     let witness = witness_bytes_for(&inputs_json, selectiveDisclosure1_witness)
         .map_err(ProverError::from)?;
-    let proved = disclosure::prove_receipt_proof(SD_PROVING_KEY, SD_R1CS, &witness)
+    let sd_prover = sd_prover()?;
+    let proved = disclosure::prove_receipt_proof_with_prover(sd_prover, &witness)
         .map_err(ProverError::from)?;
 
     // 4. Assemble the canonical receipt.
@@ -1202,15 +1273,45 @@ pub fn assemble_transfer(params_json: String) -> Result<FlowArtifacts, ProverErr
     Ok(artifacts_to_ffi(artifacts)?)
 }
 
-// Circuit artifacts, embedded in the library. The proving key (~8 MB) is
+// Circuit artifacts, embedded in the library. The proving key (~16 MB) is
 // ark-serialized; the .r1cs drives the constraint replay in `Prover`.
-const PROVING_KEY: &[u8] = include_bytes!("../circuits/policy_tx_2_2_proving_key.bin");
-const R1CS: &[u8] = include_bytes!("../circuits/policy_tx_2_2.r1cs");
+const PROVING_KEY: &[u8] = include_bytes!("../circuits/policy_tx_4_2_proving_key.bin");
+const R1CS: &[u8] = include_bytes!("../circuits/policy_tx_4_2.r1cs");
 
 // `selectiveDisclosure_1` circuit (Phase 6) — proves you own a note in the pool
 // bound to a disclosure context, revealing only {root, commitment, context}.
 const SD_PROVING_KEY: &[u8] = include_bytes!("../circuits/selectiveDisclosure_1_proving_key.bin");
 const SD_R1CS: &[u8] = include_bytes!("../circuits/selectiveDisclosure_1.r1cs");
+
+// Cached provers: deserializing the embedded proving key + R1CS is ~48% of
+// total proof time, so we pay it once per process (lazily, on first use) and
+// reuse the `Prover` for every subsequent proof/verify call.
+static POLICY_PROVER: OnceLock<Result<Prover, String>> = OnceLock::new();
+static SD_PROVER: OnceLock<Result<Prover, String>> = OnceLock::new();
+
+fn policy_prover() -> Result<&'static Prover, ProverError> {
+    POLICY_PROVER
+        .get_or_init(|| Prover::new(PROVING_KEY, R1CS).map_err(|e| format!("policy prover init: {e}")))
+        .as_ref()
+        .map_err(|e| ProverError::Failed { msg: e.clone() })
+}
+
+fn sd_prover() -> Result<&'static Prover, ProverError> {
+    SD_PROVER
+        .get_or_init(|| Prover::new(SD_PROVING_KEY, SD_R1CS).map_err(|e| format!("sd prover init: {e}")))
+        .as_ref()
+        .map_err(|e| ProverError::Failed { msg: e.clone() })
+}
+
+/// Pre-deserializes both embedded provers (policy + selective disclosure) so
+/// the first real proof skips the ~half of proof time spent loading keys.
+/// Idempotent and thread-safe.
+#[uniffi::export]
+pub fn warm_up_provers() -> Result<(), ProverError> {
+    policy_prover()?;
+    sd_prover()?;
+    Ok(())
+}
 
 /// BN254 scalar field modulus (decimal), for negative-input normalization.
 const BN254_FIELD_MODULUS: &str =
@@ -1222,10 +1323,10 @@ const FIELD_SIZE: usize = 32;
 // rust-witness generates `<stem>_witness(HashMap<String, Vec<BigInt>>) ->
 // Vec<BigInt>` from each `circuits/*.wasm` (see build.rs). The macro argument
 // must match w2c2's underscore-stripped module name (= the wasm file stem).
-rust_witness::witness!(policytx22);
+rust_witness::witness!(policytx42);
 rust_witness::witness!(selectiveDisclosure1);
 
-/// Soroban-ready proof + public signals produced by [`prove_policy_tx_2_2`].
+/// Soroban-ready proof + public signals produced by [`prove_policy_tx_4_2`].
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ProofBundle {
     /// Uncompressed Groth16 proof, Soroban encoding: A(64) || B(128) || C(64)
@@ -1237,25 +1338,25 @@ pub struct ProofBundle {
     pub public_inputs: Vec<u8>,
 }
 
-/// Generate a `policy_tx_2_2` proof from a circuit-input JSON object.
+/// Generate a `policy_tx_4_2` proof from a circuit-input JSON object.
 ///
 /// `inputs_json` is a JSON object mapping circom signal names to values
 /// (numbers, decimal/hex strings, or nested arrays/objects matching the
 /// circuit's bus layout). Flat keys like `"membershipProofs[0][0].leaf"` are
 /// accepted as-is — they match the circom signal paths the witness generator
 /// hashes.
-pub fn prove_policy_tx_2_2(inputs_json: &str) -> Result<ProofBundle> {
-    prove_circuit(inputs_json, policytx22_witness, PROVING_KEY, R1CS)
+pub fn prove_policy_tx_4_2(inputs_json: &str) -> Result<ProofBundle> {
+    let prover = policy_prover().map_err(|e| anyhow!("{e}"))?;
+    prove_circuit(inputs_json, policytx42_witness, prover)
 }
 
 /// Generic Groth16 prover: flatten the circuit-input JSON, generate the witness
-/// with `witness_fn`, and prove with the given (proving key, r1cs). Shared by
-/// the transaction and selective-disclosure circuits.
+/// with `witness_fn`, and prove with the given (cached) prover. Shared by the
+/// transaction and selective-disclosure circuits.
 fn prove_circuit(
     inputs_json: &str,
     witness_fn: fn(HashMap<String, Vec<BigInt>>) -> Vec<BigInt>,
-    proving_key: &[u8],
-    r1cs: &[u8],
+    prover: &Prover,
 ) -> Result<ProofBundle> {
     let value: serde_json::Value =
         serde_json::from_str(inputs_json).context("inputs_json is not valid JSON")?;
@@ -1278,7 +1379,6 @@ fn prove_circuit(
 
     // Prove once (compressed), then derive the uncompressed Soroban form so
     // both come from the same proof.
-    let prover = Prover::new(proving_key, r1cs).map_err(|e| anyhow!("Prover::new failed: {e}"))?;
     let proof_compressed = prover
         .prove_bytes(&witness_bytes)
         .map_err(|e| anyhow!("prove failed: {e}"))?;
@@ -1300,11 +1400,11 @@ fn prove_circuit(
 /// proving key's embedded VK, so we can confirm wire ordering before submitting
 /// to Soroban.
 pub fn verify_locally(bundle: &ProofBundle) -> Result<bool> {
-    verify_with(bundle, PROVING_KEY, R1CS)
+    let prover = policy_prover().map_err(|e| anyhow!("{e}"))?;
+    verify_with(bundle, prover)
 }
 
-fn verify_with(bundle: &ProofBundle, proving_key: &[u8], r1cs: &[u8]) -> Result<bool> {
-    let prover = Prover::new(proving_key, r1cs).map_err(|e| anyhow!("Prover::new failed: {e}"))?;
+fn verify_with(bundle: &ProofBundle, prover: &Prover) -> Result<bool> {
     // `verify` deserializes a compressed proof.
     prover
         .verify(&bundle.proof_compressed, &bundle.public_inputs)
@@ -1405,8 +1505,8 @@ fn flatten_pure_array(
 mod tests {
     use super::*;
 
-    // Known-good 1-in/1-out policy_tx_2_2 input vector (see fixture-gen).
-    const FIXTURE: &str = include_str!("../fixtures/policy_tx_2_2_1in1out.json");
+    // Known-good 1-in(of 4)/1-out policy_tx_4_2 input vector (see fixture-gen).
+    const FIXTURE: &str = include_str!("../fixtures/policy_tx_4_2_1in1out.json");
     // Valid DepositParams (see fixture-gen/src/bin/deposit_params.rs).
     const DEPOSIT_PARAMS: &str = include_str!("../fixtures/deposit_params.json");
 
@@ -1418,7 +1518,7 @@ mod tests {
             assemble_deposit(DEPOSIT_PARAMS.to_string()).expect("assemble_deposit failed");
         assert_eq!(artifacts.ext_amount, "120", "unexpected ext_amount");
         let bundle =
-            prove_policy_tx_2_2(&artifacts.circuit_inputs_json).expect("prove failed");
+            prove_policy_tx_4_2(&artifacts.circuit_inputs_json).expect("prove failed");
         assert!(
             verify_locally(&bundle).expect("verify errored"),
             "deposit proof failed to verify",
@@ -1522,13 +1622,20 @@ mod tests {
         ).unwrap();
         let leaf_dec = BigUint::from_bytes_be(&leaf.to_be_bytes()).to_str_radix(10);
 
-        // The deposit fixture carries the known-good membership proof (scalar-102,
-        // single leaf at index 0) — use its non_membership object as the template.
+        // The deposit fixture carries the known-good membership proof against the
+        // LIVE ASP tree (3 leaves, scalar-102 at index 2 — see fixture-gen's
+        // ASP_LEAVES snapshot) — use its non_membership object as the template
+        // and rebuild with the same leaf set.
         let fixture: serde_json::Value = serde_json::from_str(DEPOSIT_ONCHAIN).unwrap();
         let expected_root = fixture["membership_proof"]["root"].as_str().unwrap();
         let nm = fixture["non_membership_proof"].to_string();
 
-        let proofs = build_asp_proofs(note_pub_hex, vec![leaf_dec], 10, nm).unwrap();
+        let leaves = vec![
+            "9994517823975672122284466930373335370852567112864722324125744549747666024239".into(),
+            "2265510885976041928383517713406139983991156639540722924781593281193278186508".into(),
+            leaf_dec,
+        ];
+        let proofs = build_asp_proofs(note_pub_hex, leaves, 10, nm).unwrap();
         let rebuilt: serde_json::Value = serde_json::from_str(&proofs.membership_json).unwrap();
         assert_eq!(rebuilt["root"].as_str().unwrap(), expected_root, "rebuilt ASP root must match on-chain");
         eprintln!("✅ in-app ASP membership rebuild matches on-chain root {expected_root}");
@@ -1603,7 +1710,7 @@ mod tests {
     /// A wrong ordering yields a proof that fails verification.
     #[test]
     fn proof_from_fixture_verifies() {
-        let bundle = prove_policy_tx_2_2(FIXTURE).expect("proof generation failed");
+        let bundle = prove_policy_tx_4_2(FIXTURE).expect("proof generation failed");
         assert_eq!(bundle.proof.len(), 256, "unexpected proof byte length");
         assert_eq!(
             bundle.public_inputs.len() % 32,
@@ -1619,7 +1726,7 @@ mod tests {
     // Shared: assemble -> prove -> write pool `transact` args JSON to `out`.
     fn emit_transact(circuit_inputs_json: &str, art: &FlowArtifacts, out: &str) {
         use num_bigint::BigUint;
-        let bundle = prove_policy_tx_2_2(circuit_inputs_json).expect("prove");
+        let bundle = prove_policy_tx_4_2(circuit_inputs_json).expect("prove");
         assert!(verify_locally(&bundle).expect("verify"), "failed local verify");
         let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
         let pi: Vec<String> = bundle
@@ -1629,10 +1736,10 @@ mod tests {
             .collect();
         let json = serde_json::json!({
             "proof": {
-                "asp_membership_root": pi[7], "asp_non_membership_root": pi[9],
+                "asp_membership_root": pi[9], "asp_non_membership_root": pi[13],
                 "ext_data_hash": hex(&art.ext_data_hash),
-                "input_nullifiers": [pi[3], pi[4]],
-                "output_commitment0": pi[5], "output_commitment1": pi[6],
+                "input_nullifiers": [pi[3], pi[4], pi[5], pi[6]],
+                "output_commitment0": pi[7], "output_commitment1": pi[8],
                 "proof": { "a": hex(&bundle.proof[0..64]), "b": hex(&bundle.proof[64..192]), "c": hex(&bundle.proof[192..256]) },
                 "public_amount": pi[1], "root": pi[0],
             },
@@ -1646,7 +1753,7 @@ mod tests {
         eprintln!("wrote {out}");
     }
 
-    const POOL_ID: &str = "CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU";
+    const POOL_ID: &str = "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC";
     const RPC_URL: &str = "https://soroban-testnet.stellar.org";
 
     // ---- Desktop-only RPC helpers (reqwest dev-dep) ------------------------
@@ -1682,7 +1789,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(4));
 
         let a = assemble_deposit(DEPOSIT_ONCHAIN.to_string()).unwrap();
-        let bundle = prove_policy_tx_2_2(&a.circuit_inputs_json).unwrap();
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).unwrap();
 
         // 1. account sequence via getLedgerEntries.
         let key = account_ledger_key(acct.address.clone()).unwrap();
@@ -1795,7 +1902,7 @@ mod tests {
             WITHDRAW_ONCHAIN.to_string(), commitment_topics, leaf_index, "1000000".into(), blinding,
         ).expect("rebuild_input_path");
         let a = assemble_withdraw(params).expect("assemble_withdraw");
-        let bundle = prove_policy_tx_2_2(&a.circuit_inputs_json).expect("prove");
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).expect("prove");
 
         // 4. Fund a fresh fee payer + submit via the same split the app uses.
         let acct = generate_stellar_account();
@@ -1840,7 +1947,7 @@ mod tests {
         const SCALAR102_LEAF: &str =
             "17969525783030368157502924498519760117548348265060813172074119923679683982433";
         const NEW_ASP_ROOT_DEC: &str =
-            "16793274064763986540520174587495444877089150062859082964053717617799031097454";
+            "7650851037732131397668132823701172848267506844599464976150678500985807912790";
 
         let kb = account_shielded_keys(TEST_PHRASE.into(), 0).unwrap();
         let hex = |b: &[u8]| format!("0x{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>());
@@ -1883,7 +1990,7 @@ mod tests {
         let mut params = build_deposit_params(DEPOSIT_ONCHAIN.to_string(), "1000000".into(), topics, 10).unwrap();
         params = apply_identity(params, false, note_priv_hex, enc_pub_hex, asp.membership_json, asp.non_membership_json).unwrap();
         let a = assemble_deposit(params).expect("assemble");
-        let bundle = prove_policy_tx_2_2(&a.circuit_inputs_json).expect("prove");
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).expect("prove");
 
         let acct = generate_stellar_account();
         assert!(reqwest::blocking::Client::new()
@@ -1981,7 +2088,7 @@ mod tests {
         let asp = build_asp_proofs(hx(&a0.note_public), asp_leaves, 10, nm).unwrap();
         params = apply_identity(params, true, hx(&a0.note_private), hx(&a0.encryption_public), asp.membership_json, asp.non_membership_json).unwrap();
         let a = assemble_transfer(params).expect("assemble_transfer");
-        let bundle = prove_policy_tx_2_2(&a.circuit_inputs_json).expect("prove");
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).expect("prove");
 
         // Submit.
         let acct = generate_stellar_account();
@@ -2050,7 +2157,7 @@ mod tests {
         let params = build_deposit_params(DEPOSIT_ONCHAIN.to_string(), "3700000".into(), topics, 10)
             .expect("build_deposit_params");
         let a = assemble_deposit(params).expect("assemble_deposit");
-        let bundle = prove_policy_tx_2_2(&a.circuit_inputs_json).expect("prove");
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).expect("prove");
 
         let acct = generate_stellar_account();
         assert!(
@@ -2091,6 +2198,59 @@ mod tests {
         emit_transact(&a.circuit_inputs_json, &a, "/tmp/withdraw_args.json");
     }
 
+    /// Gate B4b: spend the fixture's note straight (no indexer rebuild needed —
+    /// `WITHDRAW_ONCHAIN` already bakes the pool_root/path for the single note
+    /// our own `submit_deposit_onchain` run put in the new pool). Mirrors
+    /// `submit_deposit_onchain`'s build/sign/submit split.
+    #[test]
+    #[ignore]
+    fn submit_withdraw_onchain() {
+        let a = assemble_withdraw(WITHDRAW_ONCHAIN.to_string()).expect("assemble_withdraw");
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).unwrap();
+
+        let acct = generate_stellar_account();
+        eprintln!("wallet {}", acct.address);
+        let funded = reqwest::blocking::Client::new()
+            .get(format!("https://friendbot.stellar.org?addr={}", acct.address))
+            .send()
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+        assert!(funded, "friendbot fund failed");
+        std::thread::sleep(std::time::Duration::from_secs(4));
+
+        let key = account_ledger_key(acct.address.clone()).unwrap();
+        let entries = rpc_call("getLedgerEntries", serde_json::json!({"keys":[key]}));
+        let entry_xdr = entries["result"]["entries"][0]["xdr"].as_str().expect("account entry xdr");
+
+        let unsigned = build_unsigned_transact(
+            POOL_ID.into(), acct.address.clone(), entry_xdr.into(),
+            bundle.proof, bundle.public_inputs, a.ext_data_hash,
+            a.ext_recipient, a.ext_amount, a.encrypted_output0, a.encrypted_output1,
+        )
+        .expect("build_unsigned_transact failed");
+
+        let sim = rpc_call("simulateTransaction", serde_json::json!({"transaction":unsigned}));
+        assert!(sim["result"]["error"].is_null(), "simulate error: {}", sim["result"]["error"]);
+
+        let signed = finalize_and_sign(unsigned, sim.to_string(), acct.secret)
+            .expect("finalize_and_sign failed");
+
+        let send = rpc_call("sendTransaction", serde_json::json!({"transaction":signed}));
+        assert_ne!(send["result"]["status"].as_str(), Some("ERROR"), "sendTransaction ERROR: {send}");
+        let hash = send["result"]["hash"].as_str().expect("tx hash").to_string();
+        let mut status = String::new();
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let g = rpc_call("getTransaction", serde_json::json!({"hash":hash}));
+            status = g["result"]["status"].as_str().unwrap_or("").to_string();
+            if status == "SUCCESS" || status == "FAILED" {
+                break;
+            }
+        }
+        assert_eq!(status, "SUCCESS", "tx {hash} not successful: {status}");
+        eprintln!("✅ WITHDRAW TX HASH = {hash}");
+    }
+
     const TRANSFER_ONCHAIN: &str = include_str!("../fixtures/transfer_onchain.json");
 
     #[test]
@@ -2124,7 +2284,7 @@ mod tests {
         use num_bigint::BigUint;
 
         let a = assemble_deposit(DEPOSIT_ONCHAIN.to_string()).expect("assemble_deposit");
-        let bundle = prove_policy_tx_2_2(&a.circuit_inputs_json).expect("prove");
+        let bundle = prove_policy_tx_4_2(&a.circuit_inputs_json).expect("prove");
         assert!(verify_locally(&bundle).expect("verify"), "proof failed local verify");
 
         let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
@@ -2137,15 +2297,15 @@ mod tests {
                 BigUint::from_bytes_be(&be).to_str_radix(10)
             })
             .collect();
-        // Order: [root, publicAmount, extDataHash, null0, null1, comm0, comm1,
-        //         memRoot0, memRoot1, nonMemRoot0, nonMemRoot1]
+        // Order: [root, publicAmount, extDataHash, null0..3, comm0, comm1,
+        //         memRoot0..3, nonMemRoot0..3]
         let proof = serde_json::json!({
-            "asp_membership_root": pi[7],
-            "asp_non_membership_root": pi[9],
+            "asp_membership_root": pi[9],
+            "asp_non_membership_root": pi[13],
             "ext_data_hash": hex(&a.ext_data_hash),
-            "input_nullifiers": [pi[3], pi[4]],
-            "output_commitment0": pi[5],
-            "output_commitment1": pi[6],
+            "input_nullifiers": [pi[3], pi[4], pi[5], pi[6]],
+            "output_commitment0": pi[7],
+            "output_commitment1": pi[8],
             "proof": { "a": hex(&bundle.proof[0..64]), "b": hex(&bundle.proof[64..192]), "c": hex(&bundle.proof[192..256]) },
             "public_amount": pi[1],
             "root": pi[0],
@@ -2172,7 +2332,7 @@ mod tests {
     #[test]
     #[ignore]
     fn emit_gate3_args() {
-        let bundle = prove_policy_tx_2_2(FIXTURE).expect("proof generation failed");
+        let bundle = prove_policy_tx_4_2(FIXTURE).expect("proof generation failed");
         assert!(verify_locally(&bundle).unwrap(), "local verify failed");
 
         let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

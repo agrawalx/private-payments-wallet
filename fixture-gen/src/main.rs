@@ -1,11 +1,15 @@
-//! Generates a known-good `policy_tx_2_2` circuit-input vector and writes it as
-//! flat JSON (`prover-ffi/fixtures/policy_tx_2_2_1in1out.json`).
+//! Generates a known-good `policy_tx_4_2` circuit-input vector and writes it as
+//! flat JSON (`prover-ffi/fixtures/policy_tx_4_2_1in1out.json`).
 //!
 //! Ported from the reference repo's `circuits/src/test/prove_policy.rs`
 //! (`test_tx_1in_1out` + `run_case`) so the inputs are guaranteed consistent
 //! with the circuit. The JSON keys are the exact circom signal paths
 //! (`membershipProofs[0][0].leaf`, `inAmount`, ...), so `prover-ffi`'s
 //! `flatten_input` round-trips them straight into the witness generator.
+//!
+//! `policy_tx_4_2` takes 4 input slots (vs. the old 2_2's 2), so the case
+//! below is "1 real input, 3 dummies" instead of "1 real, 1 dummy" — same
+//! 1-in/1-out shape, padded to the circuit's fixed width.
 
 use anyhow::Result;
 use circuits::test::utils::{
@@ -37,13 +41,26 @@ fn non_membership_overrides(pubs: &[Scalar]) -> Vec<(BigInt, BigInt)> {
 }
 
 fn main() -> Result<()> {
-    // 1-in / 1-out case (one real input @ leaf 7, one dummy @ leaf 0).
+    // 1-in / 1-out case (one real input @ leaf 7, three dummies @ leaves 0/1/2 —
+    // policy_tx_4_2 has 4 fixed input slots).
     let case = TxCase::new(
         vec![
             InputNote {
                 leaf_index: 0,
                 priv_key: Scalar::from(101u64),
                 blinding: Scalar::from(201u64),
+                amount: Scalar::from(0u64),
+            },
+            InputNote {
+                leaf_index: 1,
+                priv_key: Scalar::from(103u64),
+                blinding: Scalar::from(221u64),
+                amount: Scalar::from(0u64),
+            },
+            InputNote {
+                leaf_index: 2,
+                priv_key: Scalar::from(104u64),
+                blinding: Scalar::from(231u64),
                 amount: Scalar::from(0u64),
             },
             InputNote {
@@ -71,7 +88,7 @@ fn main() -> Result<()> {
     let leaves = prepopulated_leaves(
         LEVELS,
         0xDEAD_BEEFu64,
-        &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+        &case.inputs.iter().map(|n| n.leaf_index).collect::<Vec<_>>(),
         24,
     );
 
@@ -143,7 +160,7 @@ fn main() -> Result<()> {
     }
     let out = serde_json::to_string_pretty(&serde_json::Value::Object(map))?;
 
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../prover-ffi/fixtures/policy_tx_2_2_1in1out.json");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../prover-ffi/fixtures/policy_tx_4_2_1in1out.json");
     std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover-ffi/fixtures"))?;
     std::fs::write(path, out)?;
     println!("wrote fixture to {path}");
