@@ -1,0 +1,76 @@
+# Reproducible build + on-chain source verification for all four Soroban
+# contracts, deployed to Stellar testnet from this repo's vendor/contracts.
+#
+# Uses the OFFICIAL stellar-expert/soroban-build-workflow (pinned to stellar-cli
+# 25.1.0). The contracts were deployed with stellar-cli 25.1.0 --optimize and
+# rustc 1.96.0 (pinned in vendor/contracts/rust-toolchain.toml), so the container
+# build reproduces the on-chain WASM hashes exactly — no fork needed.
+#
+# Deployed contracts + WASM hashes (all reproduce from this repo):
+#   verifier            CCQBC4XQQXFLRG25EMIBZ54TKKSGDK2NPK73TUTKDFHVF6S54XTIMZBY
+#                       WASM bf60c5a78ca89f3f448715a65dd5dccd403103ae3e6f36fc9b37943cefc9dcd2
+#   pool                CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV
+#                       WASM 40a3231ab28af854d9c6d99f7b14020b304370c38451c7b6f4d54512499429a9
+#   asp-membership      CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH
+#                       WASM 9a250ad5596ac5119e61f173280ae3a05650ea845d9e0414e20c4f41ec99a23e
+#                       (constructor takes admin_insert_only; deployed with false =
+#                       permissionless self-serve Register)
+#   asp-non-membership  CB7MG5HSATWQ4S4C4TGWECCAIR66VM6M5KQEYOUCWUN6ZO5N3LBK4K7V
+#                       WASM 98458743d3d01bd0dcd0b60729d7fd82cd19fe2a35184bc95f17c60d9b3e3b08
+#
+# Trigger: push a tag like `contracts-v1`. Each job builds one contract, attaches
+# the WASM + a build attestation to a GitHub release, and Stellar Expert matches
+# the on-chain hash back to this repo + commit ("verified source" badge).
+
+name: Verify contracts
+
+on:
+  push:
+    tags:
+      - 'contracts-v*'
+
+permissions:
+  id-token: write        # OIDC, for the build attestation
+  contents: write        # create the release + upload the WASM
+  attestations: write    # SLSA build provenance
+
+jobs:
+  verifier:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v25.1.0
+    with:
+      release_name: '${{ github.ref_name }}-verifier'
+      release_description: 'circom-groth16-verifier — deployed CCQBC4XQ…, WASM bf60c5a7…'
+      relative_path: 'vendor/contracts'
+      package: 'circom-groth16-verifier'
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
+
+  pool:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v25.1.0
+    with:
+      release_name: '${{ github.ref_name }}-pool'
+      release_description: 'pool — deployed CDFXXZCD…, WASM 40a3231a…'
+      relative_path: 'vendor/contracts'
+      package: 'pool'
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
+
+  asp-membership:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v25.1.0
+    with:
+      release_name: '${{ github.ref_name }}-asp-membership'
+      release_description: 'asp-membership — deployed CALBHI3C…, WASM 9a250ad5…'
+      relative_path: 'vendor/contracts'
+      package: 'asp-membership'
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
+
+  asp-non-membership:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v25.1.0
+    with:
+      release_name: '${{ github.ref_name }}-asp-non-membership'
+      release_description: 'asp-non-membership — deployed CB7MG5HS…, WASM 98458743…'
+      relative_path: 'vendor/contracts'
+      package: 'asp-non-membership'
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
