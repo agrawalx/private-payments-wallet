@@ -125,8 +125,8 @@ import uniffi.prover_ffi.rebuildInputPath
 import uniffi.prover_ffi.scanNote
 import uniffi.prover_ffi.warmUpProvers
 
-private const val POOL_ID = "CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV"
-private const val ASP_MEMBERSHIP_ID = "CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH"
+private const val POOL_ID = "CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS"
+private const val ASP_MEMBERSHIP_ID = "CDGHHS4R45TKIUHYUZPNTYYND5R4KEO7J6VOOH4AYXJHRGEBYFXX27UK"
 private const val RPC_URL = "https://soroban-testnet.stellar.org"
 
 // Route withdraw/transfer through the relayer (its account is the on-chain

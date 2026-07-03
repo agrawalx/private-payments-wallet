@@ -326,10 +326,10 @@ docker run -d --name pp-indexer-pg -p 5434:5432 \
 
 # Indexer (:8080) — starts at the deployment ledger; RPC still retains the pool's full history
 cargo build --release -p indexer
-INDEXER_CONTRACTS="CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV,\
-CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH,\
-CB7MG5HSATWQ4S4C4TGWECCAIR66VM6M5KQEYOUCWUN6ZO5N3LBK4K7V" \
-INDEXER_START_LEDGER=3408231 \
+INDEXER_CONTRACTS="CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS,\
+CDGHHS4R45TKIUHYUZPNTYYND5R4KEO7J6VOOH4AYXJHRGEBYFXX27UK,\
+CDQDK5VBZCLFWM7Z4TSSK3V6DRGNHP7ACLXXKQDZFPFEHTHGDW5CTEG5" \
+INDEXER_START_LEDGER=3408703 \
 ./target/release/indexer
 curl http://127.0.0.1:8080/health
 
@@ -356,14 +356,14 @@ Circuit: `policy_tx_4_2` = `PolicyTransaction(4,2,1,1,10,10)` + Zcash-style null
 
 | Contract | ID | WASM hash |
 |---|---|---|
-| **Pool** (native XLM, 4-in/2-out) | `CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV` | `40a3231a…` |
-| **Groth16 verifier** (our VK) | `CCQBC4XQQXFLRG25EMIBZ54TKKSGDK2NPK73TUTKDFHVF6S54XTIMZBY` | `bf60c5a7…` |
-| **ASP membership** (permissionless allowlist) | `CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH` | `9a250ad5…` |
-| **ASP non-membership** (blocklist) | `CB7MG5HSATWQ4S4C4TGWECCAIR66VM6M5KQEYOUCWUN6ZO5N3LBK4K7V` | `98458743…` |
+| **Pool** (native XLM, 4-in/2-out) | `CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS` | `f6ad4938…` |
+| **Groth16 verifier** (our VK) | `CBQOCFRHT3CNONDDOZSNUJRLKGXN6KGYQG66XTIZUMGQKF4QI3SR2PUZ` | `0efd118b…` |
+| **ASP membership** (permissionless allowlist) | `CDGHHS4R45TKIUHYUZPNTYYND5R4KEO7J6VOOH4AYXJHRGEBYFXX27UK` | `b5977d1d…` |
+| **ASP non-membership** (blocklist) | `CDQDK5VBZCLFWM7Z4TSSK3V6DRGNHP7ACLXXKQDZFPFEHTHGDW5CTEG5` | `aaab97b2…` |
 
 All four are built reproducibly from `vendor/contracts` (stellar-cli 25.1.0 `--optimize`, rustc 1.96.0) and source-verifiable on Stellar Expert via `.github/workflows/verify-contracts.yml`.
 
-Explorer: `https://stellar.expert/explorer/testnet/contract/CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV`
+Explorer: `https://stellar.expert/explorer/testnet/contract/CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS`
 
 ### Example transactions
 

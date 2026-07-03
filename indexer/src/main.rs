@@ -32,9 +32,9 @@ impl Config {
         // ASP non-membership) — override with INDEXER_CONTRACTS if redeployed.
         let contracts = env(
             "INDEXER_CONTRACTS",
-            "CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV,\
-             CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH,\
-             CB7MG5HSATWQ4S4C4TGWECCAIR66VM6M5KQEYOUCWUN6ZO5N3LBK4K7V",
+            "CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS,\
+             CDGHHS4R45TKIUHYUZPNTYYND5R4KEO7J6VOOH4AYXJHRGEBYFXX27UK,\
+             CDQDK5VBZCLFWM7Z4TSSK3V6DRGNHP7ACLXXKQDZFPFEHTHGDW5CTEG5",
         )
         .split(',')
         .map(|s| s.trim().to_string())
@@ -47,7 +47,7 @@ impl Config {
                 "postgres://indexer:indexer@localhost:5434/indexer",
             ),
             contracts,
-            start_ledger: env("INDEXER_START_LEDGER", "3408231").parse().unwrap_or(0),
+            start_ledger: env("INDEXER_START_LEDGER", "3408703").parse().unwrap_or(0),
             poll_interval: Duration::from_secs(env("INDEXER_POLL_SECS", "5").parse().unwrap_or(5)),
             bind: env("INDEXER_BIND", "0.0.0.0:8080"),
             page_size: env("INDEXER_PAGE_SIZE", "200").parse().unwrap_or(200),

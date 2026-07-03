@@ -1753,7 +1753,7 @@ mod tests {
         eprintln!("wrote {out}");
     }
 
-    const POOL_ID: &str = "CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV";
+    const POOL_ID: &str = "CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS";
     const RPC_URL: &str = "https://soroban-testnet.stellar.org";
 
     // ---- Desktop-only RPC helpers (reqwest dev-dep) ------------------------
