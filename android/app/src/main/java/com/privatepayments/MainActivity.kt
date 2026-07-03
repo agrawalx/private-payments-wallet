@@ -125,8 +125,8 @@ import uniffi.prover_ffi.rebuildInputPath
 import uniffi.prover_ffi.scanNote
 import uniffi.prover_ffi.warmUpProvers
 
-private const val POOL_ID = "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC"
-private const val ASP_MEMBERSHIP_ID = "CBAC6AKBPK325WFTWXS3QRYBIDEFUGPC3ZZXMOW3JVTA4F5QSFRI5LF2"
+private const val POOL_ID = "CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV"
+private const val ASP_MEMBERSHIP_ID = "CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH"
 private const val RPC_URL = "https://soroban-testnet.stellar.org"
 
 // Route withdraw/transfer through the relayer (its account is the on-chain
@@ -532,7 +532,7 @@ class MainActivity : ComponentActivity() {
                         val addr = walletAddr
                         if (publicMode && addr != null) {
                             val pays = withContext(Dispatchers.IO) {
-                                runCatching { HorizonClient.recentPayments(HorizonClient.TESTNET_URL, addr) }
+                                runCatching { HorizonClient.recentPublicActivity(HorizonClient.TESTNET_URL, addr) }
                                     .getOrDefault(emptyList())
                             }
                             publicActivity = pays.map { p ->
@@ -544,7 +544,11 @@ class MainActivity : ComponentActivity() {
                                     positive = !p.sent,
                                     time = com.privatepayments.ui.dateOf(p.createdAt),
                                     subtitle = (if (p.sent) "To " else "From ") +
-                                        com.privatepayments.ui.shortAddress(p.counterparty),
+                                        // Real G-addresses get shortened; contract-driven
+                                        // credits (e.g. a shielded withdraw) carry a plain label.
+                                        (if (p.counterparty.startsWith("G") && p.counterparty.length == 56)
+                                            com.privatepayments.ui.shortAddress(p.counterparty)
+                                        else p.counterparty),
                                     url = p.txHash.takeIf { it.isNotEmpty() }
                                         ?.let { "https://stellar.expert/explorer/testnet/tx/$it" },
                                     kind = if (p.sent) com.privatepayments.ui.ActivityKind.PublicSent
@@ -953,7 +957,10 @@ class MainActivity : ComponentActivity() {
                         )
                         Screen.Disclosure -> {
                             // Disclosure proves a SINGLE note — the user picks which one.
+                            // Skip 0-value notes: a private send scans back empty
+                            // output notes (amount 0) that carry nothing to disclose.
                             val discNotes = noteStore.unspentNotes()
+                                .filter { it.amount > 0 }
                                 .sortedByDescending { it.amount }
                                 .map { com.privatepayments.ui.NoteOption(it.leafIndex, it.amount) }
                             DisclosureScreen(

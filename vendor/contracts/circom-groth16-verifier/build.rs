@@ -5,13 +5,18 @@
 //! output directory.  `lib.rs` includes that file at compile time, embedding
 //! the verification key as static byte arrays with no persistent storage.
 //!
-//! If `VERIFIER_VK_JSON` is not set the script writes zero-filled placeholder
-//! constants so that the crate still compiles for `cargo check` and unit tests
-//! that call `verify_with_vk` directly.
+//! If `VERIFIER_VK_JSON` is not set the script falls back to the VK committed in
+//! this crate at `vk/policy_tx_4_2_vk.json`. This makes a plain
+//! `stellar contract build` reproduce the exact deployed WASM with no external
+//! inputs — required for reproducible on-chain source verification. The env var
+//! still overrides, e.g. to build a verifier for a different circuit.
 //!
 //! # Usage
 //!
 //! ```bash
+//! # reproducible build against the committed VK (matches the deployed contract):
+//! stellar contract build --package circom-groth16-verifier
+//! # or override with a different VK:
 //! VERIFIER_VK_JSON=/path/to/verification_key.json \
 //!   cargo build -p circom-groth16-verifier --release
 //! ```
@@ -26,8 +31,13 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    let path = env::var("VERIFIER_VK_JSON").expect("VERIFIER_VK_JSON not set");
-    let path = PathBuf::from(&path);
+    // Env var overrides; otherwise use the VK committed in this crate so the
+    // build is self-contained and reproducible (see module docs).
+    let path = match env::var("VERIFIER_VK_JSON") {
+        Ok(p) => PathBuf::from(p),
+        Err(_) => PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))
+            .join("vk/policy_tx_4_2_vk.json"),
+    };
     println!("cargo:rerun-if-changed={}", path.display());
     let json = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read VK file `{}`: {e}", path.display()));

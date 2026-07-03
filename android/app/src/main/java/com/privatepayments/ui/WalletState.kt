@@ -63,6 +63,10 @@ class WalletState {
         notesScanned = notes.count { !it.spent }
         activity.clear()
         notes.forEach { note ->
+            // Skip 0-value notes: a private send scans back empty output notes
+            // (amount 0) — these are "notes received", not money received, so they
+            // must not appear as inflow rows. Real change (>0) is already matched.
+            if (note.amount <= 0L) return@forEach
             // Plain labels (no contacts / no recipient identity in a privacy-pool
             // transfer): Deposit (public in), Received (private in), Change (to
             // self — a transfer's own change output), Transferred (private out).

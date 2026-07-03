@@ -1,0 +1,8 @@
+# Pin the toolchain so the contract WASM is byte-reproducible across machines and
+# CI. This is the exact rustc that built the deployed verifier
+# (circom-groth16-verifier, on-chain WASM hash 95dc1bf9…). Changing it can change
+# the WASM hash and break on-chain source verification.
+[toolchain]
+channel = "1.96.0"
+targets = ["wasm32v1-none"]
+components = ["rust-src"]

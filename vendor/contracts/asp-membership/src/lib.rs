@@ -81,18 +81,27 @@ impl ASPMembership {
     ///
     /// # Panics
     /// Panics if levels is 0 or greater than 32
-    pub fn __constructor(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
+    pub fn __constructor(
+        env: Env,
+        admin: Address,
+        levels: u32,
+        admin_insert_only: bool,
+    ) -> Result<(), Error> {
         let store = env.storage().persistent();
 
         if levels == 0 || levels > 32 {
             return Err(Error::WrongLevels);
         }
 
-        // Initialize admin and tree parameters
+        // Initialize admin and tree parameters. `admin_insert_only` is an explicit
+        // required constructor arg (no silent default): pass `false` for a
+        // permissionless allowlist where wallets self-serve `insert_leaf` (the app's
+        // Register flow), `true` to restrict inserts to the admin. Changeable later
+        // via `set_admin_insert_only`.
         store.set(&DataKey::Admin, &admin);
         store.set(&DataKey::Levels, &levels);
         store.set(&DataKey::NextIndex, &0u64);
-        store.set(&DataKey::AdminInsertOnly, &true);
+        store.set(&DataKey::AdminInsertOnly, &admin_insert_only);
 
         // Initialize an empty tree with zero hashes at each level
         let zeros: Vec<U256> = get_zeroes(&env);
