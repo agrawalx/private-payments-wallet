@@ -29,8 +29,8 @@ import com.privatepayments.ui.theme.umbraScreen
 
 /**
  * Amount (+ optional recipient) entry for deposit / send / withdraw. Enforces the
- * **2-note circuit limit** for spends: a single payment can use at most 2 input
- * notes, so the max is the sum of the 2 largest unspent notes. Over that, the
+ * **4-note circuit limit** for spends: a single payment can use at most 4 input
+ * notes, so the max is the sum of the 4 largest unspent notes. Over that, the
  * screen blocks + explains rather than failing at the contract.
  */
 @Composable
@@ -92,8 +92,8 @@ fun AmountScreen(
         if (maxStroops != null) {
             val maxXlm = xlm(maxStroops)
             Text(
-                if (overCap) "Over the limit. One payment spends at most 2 notes — max $maxXlm XLM. Send less or deposit more."
-                else "Max in one payment: $maxXlm XLM · the pool spends at most 2 notes per transaction",
+                if (overCap) "Over the limit. One payment spends at most 4 notes — max $maxXlm XLM. Send less or deposit more."
+                else "Max in one payment: $maxXlm XLM · the pool spends at most 4 notes per transaction",
                 color = if (overCap) Umbra.Error else Umbra.TextFaint, fontSize = 12.sp, lineHeight = 17.sp,
             )
         } else {

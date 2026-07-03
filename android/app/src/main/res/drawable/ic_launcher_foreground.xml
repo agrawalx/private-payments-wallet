@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- "Stella" — a five-point star, sized inside the adaptive safe zone. -->
+    <path
+        android:pathData="M54,20 L62.23,42.67 L86.34,43.49 L67.32,58.33 L73.99,81.51 L54,68 L34.01,81.51 L40.68,58.33 L21.66,43.49 L45.77,42.67 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54" android:startY="20"
+                android:endX="54" android:endY="82">
+                <item android:offset="0" android:color="#FFFFFFFF" />
+                <item android:offset="1" android:color="#FFE9E2FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Sparkle diamond, top-right, for a bit of shimmer. -->
+    <path
+        android:pathData="M80,25 L82,30.5 L80,36 L78,30.5 Z"
+        android:fillColor="#FFFFFFFF"
+        android:fillAlpha="0.85" />
+</vector>

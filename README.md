@@ -1,137 +1,311 @@
 # Stella — private payments wallet on Stellar
 
-A self-custodial Android wallet for **shielded payments** on the Stellar testnet, built on
-Nethermind's privacy-pool Soroban contracts + Circom circuits, with **zero-knowledge proofs
-generated on-device**. Deposit publicly into a pool, then send/withdraw privately — amounts and
-links are hidden by a Groth16 proof the phone produces itself. A second, fully classic "Daylight"
-mode sits right alongside it for plain public XLM.
+A self-custodial **Android** wallet for **shielded payments** on the Stellar testnet. Built on
+Nethermind's privacy-pool Soroban contracts + Circom circuits, **forked and vendored in-repo**, with
+**zero-knowledge proofs generated on-device**. Deposit publicly into a pool, then send or withdraw
+privately — amounts and links are hidden behind a Groth16 proof the phone produces itself (~1.9 s via
+rapidsnark). A second, fully classic **☀ Public** mode sits right alongside for plain public XLM.
 
 <p align="center">
-  <img src="docs/screenshots/home-shielded.png" width="230" alt="Shielded home — balance revealed" />
-  <img src="docs/screenshots/home-public.png" width="230" alt="Public home with activity" />
-## Highlights
-
-- **On-device Groth16 proving.** No server ever sees your keys, amounts, or recipients — the
-  phone builds and proves the transaction itself (`prover-ffi/`, Rust compiled to a native `.so`).
-- **Two faces, one wallet.** A tap-or-swipe slider flips between **☀ Public** (plain Stellar XLM)
-  and **🔒 Shielded** (the privacy pool), each with its own palette and a circular-reveal
-  transition anchored to the thumb.
-- **Full activity history**, mode-aware and grouped by day for public payments, with a tap-through
-  to [stellar.expert](https://stellar.expert) on any transaction.
-- **A local address book.** Save a name against a public `G…` address and/or a shielded `stella:`
-  address, then send to it directly — no more re-copying addresses out of a block explorer.
-- **MetaMask-style "your other addresses."** Moving XLM between your own accounts shows them as
-  one-tap chips right on the Send screen (see below) instead of a manual copy-paste round trip.
-- **Multi-account, BIP39/SEP-5.** One recovery phrase, unlimited accounts, each with its own
-  shielded keys and note store — plus encrypted Google Drive backup of your note history.
-
-<p align="center">
-  <img src="docs/screenshots/send-quickpick.png" width="260" alt="Send screen showing quick-pick chips for your other accounts" />
+  <img src="screenshots/home_shielded.png" width="230" alt="Shielded home" />
+  <img src="screenshots/home_public.png"   width="230" alt="Public home" />
 </p>
 
-```
-Phone (Kotlin UI + Rust prover via UniFFI)
-   │  HTTPS                         │ HTTP
-   ▼                               ▼
-Soroban RPC (public testnet)   Indexer (Rust + Postgres)  ← you run this
-   │ runs                          (durable pool/ASP event feed for the wallet)
-   ▼
-On-chain: Pool · Groth16 verifier · ASP (membership + non-membership)
-```
-
-The wallet needs **two** backends: the public **Soroban RPC** (no setup) and an **indexer**
-(you run it, or host one). The relayer is **off** by default — transactions self-submit and pay
-their own gas, so no relayer server is required.
-
-For a deep dive into the cryptography, contracts, and full request traces, see
-**[walkthrough.md](walkthrough.md)**.
+> **Testnet only. Unaudited. Do not use with real assets.**
 
 ---
 
-## Prerequisites
+## Contents
 
+- [Feature guide (visual walkthrough)](#feature-guide) — every screen + how to use it
+- [Architecture](#architecture) — the four moving parts
+- [Repo layout](#repo-layout)
+- [Build & run](#build--run)
+- [Deployed contracts & example transactions](#deployed-contracts--example-transactions)
+- [Demo](#demo)
+
+---
+
+<a name="feature-guide"></a>
+## Feature guide
+
+> **Screenshots are placeholders.** Drop PNGs into `screenshots/` using the filenames below and they
+> render automatically. Each entry is: *what it is* → *how to use it*.
+
+### 1. Onboarding — create or import a wallet
+One BIP39 12-word phrase (SEP-5 `m/44'/148'/0'`), Keystore-encrypted on device. From it Stella
+derives unlimited accounts, each with its own Stellar address **and** its own shielded (note +
+encryption) keys.
+
+**How to use:** launch → **Create wallet** (write the 12 words down) or **Import** an existing phrase
+→ confirm a few words → you land on Home.
+
+<p align="center">
+  <img src="screenshots/01_onboarding_welcome.png"  width="220" alt="Welcome" />
+  <img src="screenshots/02_onboarding_seed.png"     width="220" alt="Recovery phrase" />
+  <img src="screenshots/03_onboarding_confirm.png"  width="220" alt="Confirm phrase" />
+</p>
+
+### 2. Two faces, one wallet — Public ☀ / Shielded 🔒
+A tap-or-swipe slider flips between **Public** (plain Stellar XLM) and **Shielded** (the privacy
+pool). Each face has its own palette, balance card, and activity feed; the transition is a
+circular reveal anchored to the thumb.
+
+**How to use:** tap or drag the slider at the top of Home. Everything below re-themes to the active
+rail.
+
+<p align="center">
+  <img src="screenshots/04_mode_slider.png" width="230" alt="Mode slider" />
+  <img src="screenshots/05_home_public.png" width="230" alt="Public home" />
+</p>
+
+### 3. Fund from testnet
+New accounts start empty. One tap asks friendbot for testnet XLM.
+
+**How to use:** **Fund from testnet** on Home → wait for the balance to appear.
+
+<p align="center"><img src="screenshots/06_fund_testnet.png" width="230" alt="Fund from testnet" /></p>
+
+### 4. Register (one-time ASP enrollment)
+To **spend** from the pool (deposit, send, withdraw) an account is enrolled once into the on-chain
+ASP membership set. **Receiving needs no enrollment.**
+
+**How to use:** the app prompts on your first spend → **Register** → one on-chain tx, then continue.
+
+<p align="center"><img src="screenshots/07_register.png" width="230" alt="Register" /></p>
+
+### 5. Deposit — public XLM into the shielded pool
+Moves public XLM into the pool as an encrypted note. Public and always self-submitted (the deposit
+amount is visible by design; the note contents are not).
+
+**How to use:** Shielded Home → **Deposit** → amount → **Confirm** → proof builds → done.
+
+<p align="center">
+  <img src="screenshots/08_deposit_amount.png"  width="220" alt="Deposit amount" />
+  <img src="screenshots/09_confirm.png"         width="220" alt="Confirm" />
+</p>
+
+### 6. Private send (P2P) — routed through the relayer
+Spends your notes and pays a recipient's **shielded** address. The proof is built on-device and
+POSTed to the relayer, which submits it as **its own account** — the wallet's Stellar account never
+appears on-chain (source-unlinkable). `ext_data_hash` binds the recipient + amount inside the proof,
+so the relayer cannot redirect or skim.
+
+**How to use:** Shielded Home → **Send** → paste/scan a `stella:` address (or pick a contact) →
+amount → **Confirm**.
+
+<p align="center">
+  <img src="screenshots/10_send_recipient.png" width="220" alt="Send recipient" />
+  <img src="screenshots/11_send_confirm.png"   width="220" alt="Send confirm" />
+</p>
+
+### 7. Withdraw — shielded pool back to a public address
+Consolidates up to 4 notes and pays out to any public `G…` address, also via the relayer.
+
+**How to use:** Shielded Home → **Withdraw** → destination `G…` address → amount → **Confirm**.
+
+<p align="center"><img src="screenshots/12_withdraw.png" width="230" alt="Withdraw" /></p>
+
+### 8. The proof moment — on-device Groth16
+Every shielded spend builds a real Groth16 proof on the phone (rapidsnark, ~1.9 s on the 4-in/2-out
+circuit; cached arkworks fallback ~4–5 s). No server ever sees your keys, amounts, or recipients.
+
+**How to use:** nothing — the stepper shows proof progress, then the success screen reports
+*"ZK proof built on your phone in X.Xs."*
+
+<p align="center">
+  <img src="screenshots/13_proof_stepper.png" width="220" alt="Proof stepper" />
+  <img src="screenshots/14_success.png"       width="220" alt="Success + confetti" />
+</p>
+
+### 9. Success + share receipt
+Scale-in confetti, the proof timing, and **Share receipt** (verb + amount + tx hash + explorer URL).
+
+**How to use:** appears automatically after any send/withdraw/deposit; tap **Share** to hand off a
+receipt.
+
+### 10. Activity — mode-aware history
+Public payments grouped by day with a tap-through to stellar.expert; shielded notes labelled
+**Deposit / Received / Sent / Change (to self)**, filterable with chips. Pending spends show a
+spinner row instantly and resolve when the note-set changes.
+
+**How to use:** the **Activity** tab → filter chips at the top → tap any row for detail.
+
+<p align="center">
+  <img src="screenshots/15_activity.png"        width="220" alt="Activity feed" />
+  <img src="screenshots/16_activity_filters.png" width="220" alt="Activity filters" />
+</p>
+
+### 11. Transaction detail
+Hero amount + type/status/date/privacy badge. Public txns get a stellar.expert button; shielded
+events show leaf index + commitment (no public tx hash exists for a shielded event).
+
+<p align="center"><img src="screenshots/17_tx_detail.png" width="230" alt="Transaction detail" /></p>
+
+### 12. People — address book + QR scan
+Save a name against a public `G…` and/or shielded `stella:` address, then send straight to it. New
+contacts can be added by scanning a QR. Your own other accounts appear as one-tap **quick-pick
+chips** on the Send screen (MetaMask-style), no copy-paste round trip.
+
+**How to use:** **People** tab → **Add** (type or **Scan QR**) → later, tap a contact to jump into
+Send prefilled. Edit with the pencil.
+
+<p align="center">
+  <img src="screenshots/18_people.png"   width="220" alt="People / contacts" />
+  <img src="screenshots/19_qr_scan.png"  width="220" alt="QR scanner" />
+</p>
+
+### 13. Receive
+Shows a QR + copyable string for the active address (public `G…` or shielded `stella:`).
+
+<p align="center"><img src="screenshots/20_receive.png" width="230" alt="Receive QR" /></p>
+
+### 14. Viewing key — auditor disclosure (export)
+Export a **`stellaview2:`** viewing key = your encryption key **+** nullifier-deriving key (`nk`).
+The holder can, from public chain data alone, see every payment you **receive**, see **when notes are
+spent**, distinguish **change from real payments**, and compute your **net balance** — but can
+**never move funds**. A [Zcash-style full-viewing-key split](docs/full-viewing-key.md) makes this
+possible. It is permanent and irrevocable; the export screen states this before revealing the key.
+
+**How to use:** **Settings → Viewing key** → read the warning → **Copy** / **Share** / show QR.
+
+<p align="center"><img src="screenshots/21_viewing_key.png" width="230" alt="Viewing key export" /></p>
+
+### 15. Audit a wallet
+Paste (or scan) someone's `stellaview2:` key to replay their history read-only: total received, spend
+netting, change detection, net unspent — with dates.
+
+**How to use:** **Settings → Audit a wallet** → paste key → watch *"Scanned N of M"* → read the
+report.
+
+<p align="center"><img src="screenshots/22_audit.png" width="230" alt="Audit a wallet" /></p>
+
+### 16. Proof of funds (selective disclosure)
+Prove ownership of a note of amount **X**, bound to a named authority + purpose, without revealing
+which note or your balance. Four on-verify checks: proof ∧ context ∧ known-root ∧ amount.
+
+**How to use:** Shielded Home → **Prove funds** → authority + purpose → **Copy / Share** the receipt.
+
+<p align="center"><img src="screenshots/23_prove_funds.png" width="230" alt="Proof of funds" /></p>
+
+### 17. Settings — accounts, recovery, backup
+Switch/add accounts (each a distinct SEP-5 address with its own shielded keys), reveal the recovery
+phrase, and take an **encrypted Google Drive backup** (AES-256-GCM, `appDataFolder`).
+
+<p align="center">
+  <img src="screenshots/24_settings.png"       width="220" alt="Settings" />
+  <img src="screenshots/25_account_switch.png" width="220" alt="Account switcher" />
+</p>
+
+### 18. Network status & haptics
+A sync banner on every tab (green / amber / red dot + **Retry**); a warning on the private-send
+Confirm screen when the relayer is unreachable. Haptic ticks on confirm, copy, mode-switch, and
+success/error.
+
+<p align="center"><img src="screenshots/26_network_banner.png" width="230" alt="Network status banner" /></p>
+
+---
+
+<a name="architecture"></a>
+## Architecture
+
+Four moving parts: **ZK circuits + prover** (on the phone), **smart contracts** (on Soroban), the
+**indexer**, and the **relayer**.
+
+<p align="center"><img src="docs/architecture.svg" width="900" alt="Architecture diagram" /></p>
+
+> Source is `docs/architecture.excalidraw` — open it at [excalidraw.com](https://excalidraw.com) to
+> edit and export a hand-drawn PNG.
+
+- **Phone** builds the Groth16 proof on-device (Rust prover via UniFFI, rapidsnark) and drives the UI
+  in Kotlin/Compose.
+- **Indexer** (Rust + Postgres) polls Soroban RPC for pool/ASP events and serves them at `/events`;
+  the wallet rebuilds the complete commitment + ASP Merkle trees from that feed.
+- **Relayer** submits private spends (withdraw/transfer) as its **own** account for source
+  unlinkability; deposits self-submit through Soroban RPC.
+- **Soroban contracts**: the **Pool**, the **Groth16 verifier**, and the two **ASP** contracts
+  (membership allowlist + non-membership blocklist).
+
+Both the indexer and the relayer are hosted on one EC2 box behind nginx (single origin — `/events` →
+indexer, `/relay` → relayer); see `deploy/aws/`.
+
+---
+
+<a name="repo-layout"></a>
+## Repo layout
+
+```
+prover-ffi/        Rust ZK library exposed to Kotlin via UniFFI
+  src/lib.rs         exported FFI: derive_keys, prove_policy_tx_4_2_json, warm_up_provers,
+                     verify_proof_bundle, assemble_{deposit,withdraw,transfer}, scan_note,
+                     scan_commitment, compute_note_nullifier, rebuild_input_path,
+                     build_unsigned_transact, finalize_and_sign, mnemonic_to_account,
+                     issue/verify_disclosure_receipt, current_pool_root
+  src/submit.rs      PURE tx build + sign (17-signal public inputs, 4 nullifiers); no network
+  src/wallet.rs      BIP39 + SLIP-0010 ed25519 (SEP-5) derivation + backup-key HKDF
+  src/rapidsnark_backend.rs   rapidsnark prover + snarkjs→Soroban proof re-encode
+  circuits/          embedded proving key + r1cs + policytx42.wasm (NO underscores!)
+  bindings/kotlin/   generated prover_ffi.kt
+
+vendor/            our fork of the circuits, contracts, and core crates (ships with the app)
+  circuits/          Circom: policy_tx_4_2 = PolicyTransaction(4,2,1,1,10,10) + nk split
+  contracts/         Soroban pool / verifier / ASP (own cargo workspace)
+  app/crates/        core prover / types / disclosure / zkhash (path deps)
+  ceremony/          trusted-setup artifacts (final zkey + exported keys; toxic waste git-ignored)
+
+fixture-gen/       dev tools that build valid circuit inputs against LIVE on-chain roots
+indexer/           standalone Postgres-backed event indexer (axum + sqlx)
+relayer/           source-unlinkable submit service (axum) for withdraw/transfer
+deploy/aws/         Terraform + systemd + nginx to host indexer+relayer on EC2
+android/           Compose app (com.privatepayments)
+  app/src/main/java/com/privatepayments/
+    MainActivity          flow router, sync + reconcile loop, prover warm-up
+    net/{IndexerClient,RelayerClient,SorobanRpc,Endpoints,DriveBackup}
+    state/{ChainStore,NoteStore,CoinSelector,ContactStore,WalletBackup}
+    ui/*                  Home / Amount / Confirm / Proof / Success / Activity / TxDetail /
+                          People / Receive / Settings / Recovery / Backup / ViewingKey / Audit /
+                          Disclosure / Register / Onboarding + QR scanner + Format/Haptics/Common
+  app/src/main/assets/    policy_tx_4_2_final.zkey (rapidsnark) + on-chain fixtures
+  app/src/main/jniLibs/arm64-v8a/   libprover_ffi.so + libc++_shared.so
+
+docs/              architecture diagram (.svg + .excalidraw) + full-viewing-key.md
+walkthrough.md     deep dive: crypto, contracts, full request traces
+plan.md            phase-by-phase status
+```
+
+---
+
+<a name="build--run"></a>
+## Build & run
+
+### Prerequisites
 - **Rust** (rustup) + `cargo install cargo-ndk` + `rustup target add aarch64-linux-android`
-- **Android SDK + NDK** (r27+). Set `ANDROID_HOME` and `ANDROID_NDK_HOME`.
-- **Docker** (for the indexer's Postgres)
-- **adb** (platform-tools) + a physical **arm64 Android** device (or an arm64 emulator) with USB debugging
-- **JDK 17** — Gradle auto-provisions one via foojay if you don't have it
+- **Android SDK + NDK** (r27+); set `ANDROID_HOME` and `ANDROID_NDK_HOME`
+- **adb** + a physical **arm64 Android** device (or arm64 emulator) with USB debugging
+- **JDK 17** — Gradle auto-provisions one via foojay if absent
+- **Docker** — only if you self-host the indexer's Postgres
 
----
+The app ships pointed at the **hosted** backend (`Endpoints.kt` → `http://52.66.141.112`,
+`USE_RELAYER = true`), so a from-source build needs **no local services**. Steps 1 & 3 below are only
+for running your own indexer/relayer.
 
-## 1. Run the indexer
-
-The indexer polls the Soroban RPC for the pool + ASP contract events and serves them to the wallet.
-
-> **You must seed it from the provided dump — do not start a fresh indexer from scratch.**
-> Soroban testnet RPC only retains ~24h of events, so a fresh indexer can't fetch the pool's earlier
-> history. The wallet rebuilds the *complete* commitment + ASP Merkle trees from that history, so a
-> partial indexer produces wrong roots and **spends will fail**. `indexer/seed/stella_events.sql`
-> contains the full event history; restore it first, then the indexer only fetches *new* events from
-> there. Inserts are idempotent (`event_id` is `UNIQUE`, `ON CONFLICT DO NOTHING`), so any overlap is
-> deduped — no duplicate events.
->
-> **Note:** the contracts below were redeployed fresh (deployment ledger `3395077`), so the bundled
-> `stella_events.sql` seed is stale (it's for the *previous* deployment) and step (b) can be skipped
-> until you regenerate the seed — a brand-new indexer starting at the deployment ledger sees the
-> complete history since nothing has fallen out of RPC's retention window yet.
+### 1. Build the app from source
+The Rust prover compiles to `libprover_ffi.so`; the Kotlin UniFFI bindings are committed.
 
 ```sh
-# (a) Postgres — matches the indexer's default DATABASE_URL (localhost:5434, user/pw/db=indexer)
-docker run -d --name pp-indexer-pg -p 5434:5432 \
-  -e POSTGRES_USER=indexer -e POSTGRES_PASSWORD=indexer -e POSTGRES_DB=indexer \
-  postgres:16
-# next time, just: docker start pp-indexer-pg
-
-# (b) seed the full event history into the DB (run once)
-docker exec -i pp-indexer-pg psql -U indexer -d indexer < indexer/seed/stella_events.sql
-
-# (c) build + run the indexer — it resumes from the seeded cursor and pulls only NEW events
-cargo build --release -p indexer
-
-INDEXER_CONTRACTS="CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU,CDPU2F73UKCYBXK7LRE25JAM7G7MZQANKZRIAEORKRJZSSPDK4CAE5A6,CDH4LEBFJN5UHZ5GC5R2P5POXLWOJ4QTL7LS6RH4UKQ6JBVTC43I7ZRP" \
-INDEXER_START_LEDGER=3395077 \
-./target/release/indexer
-
-# (d) sanity check (in another shell)
-curl http://127.0.0.1:8080/health        # -> {"events":N,"status":"ok"} ; N >= 125
-```
-
-> **Keeping the dump current:** to refresh the seed after more activity, regenerate it from a
-> caught-up indexer DB:
-> ```sh
-> docker exec pp-indexer-pg pg_dump -U indexer -d indexer --clean --if-exists > indexer/seed/stella_events.sql
-> ```
-
-Env vars (all have testnet defaults; see `indexer/src/main.rs`):
-`INDEXER_CONTRACTS` (pool, ASP-membership, ASP-non-membership), `INDEXER_START_LEDGER`,
-`INDEXER_RPC_URL` (default `https://soroban-testnet.stellar.org`),
-`DATABASE_URL` (default `postgres://indexer:indexer@localhost:5434/indexer`),
-`INDEXER_BIND` (default `0.0.0.0:8080`).
-
----
-
-## 2. Build the app from source
-
-The Rust prover compiles to an Android native lib (`libprover_ffi.so`); the Kotlin UniFFI bindings
-are already committed (`android/app/src/main/java/uniffi/prover_ffi/prover_ffi.kt`).
-
-```sh
-# (a) build the prover → Android arm64 native lib, dropped into jniLibs
+# (a) build the prover → Android arm64 native lib, into jniLibs
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/<your-ndk-version>"   # e.g. 27.0.12077973
-cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p prover-ffi --release
+cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p prover-ffi --release --features rapidsnark
 
 # (b) build the APK
 cd android
-./gradlew assembleDebug          # debug, or: ./gradlew assembleRelease
+./gradlew assembleDebug           # or assembleRelease
 
 # (c) install on a connected device
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-APK outputs: `android/app/build/outputs/apk/{debug,release}/app-*.apk`.
-
-> **Regenerating UniFFI bindings** — only needed if you change the Rust FFI surface in
-> `prover-ffi/src/lib.rs`:
+> Regenerate UniFFI bindings only if you change the Rust FFI surface:
 > ```sh
 > cargo run -p prover-ffi --bin uniffi-bindgen -- generate \
 >   --library android/app/src/main/jniLibs/arm64-v8a/libprover_ffi.so \
@@ -140,56 +314,78 @@ APK outputs: `android/app/build/outputs/apk/{debug,release}/app-*.apk`.
 >   android/app/src/main/java/uniffi/prover_ffi/prover_ffi.kt
 > ```
 
----
-
-## 3. Point the phone at your local indexer
-
-The app reads the indexer at `http://127.0.0.1:8080` (see `IndexerClient.kt`). For a device on USB,
-forward that port:
+### 2. (Optional) run your own indexer + relayer
+To point the app at localhost instead of AWS, uncomment the local origins in
+`net/Endpoints.kt`, rebuild, then:
 
 ```sh
-adb reverse tcp:8080 tcp:8080
+# Postgres (indexer's default DATABASE_URL: localhost:5434, user/pw/db = indexer)
+docker run -d --name pp-indexer-pg -p 5434:5432 \
+  -e POSTGRES_USER=indexer -e POSTGRES_PASSWORD=indexer -e POSTGRES_DB=indexer postgres:16
+# next time: docker start pp-indexer-pg
+
+# Indexer (:8080) — starts at the deployment ledger; RPC still retains the pool's full history
+cargo build --release -p indexer
+INDEXER_CONTRACTS="CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV,\
+CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH,\
+CB7MG5HSATWQ4S4C4TGWECCAIR66VM6M5KQEYOUCWUN6ZO5N3LBK4K7V" \
+INDEXER_START_LEDGER=3408231 \
+./target/release/indexer
+curl http://127.0.0.1:8080/health
+
+# Relayer (:8090) — self-funds a fresh account via friendbot on first run
+cargo build --release -p relayer && ./target/release/relayer
 ```
 
-If you **host** the indexer instead (recommended for a shared build — one instance serves everyone),
-change `IndexerClient.BASE` to your `https://…` URL and rebuild. The Soroban RPC is public, so with a
-hosted indexer the app needs no local services at all.
+For a USB device: `adb reverse tcp:8080 tcp:8080 && adb reverse tcp:8090 tcp:8090`.
+To host on AWS instead, see `deploy/aws/README.md` (`package.sh` → scp → `setup-server.sh`).
+
+### 3. Desktop prover / flow tests
+```sh
+cargo test -p prover-ffi --lib <name> -- --ignored --nocapture   # proving is slow
+```
 
 ---
 
-## Using the app
+<a name="deployed-contracts--example-transactions"></a>
+## Deployed contracts & example transactions
 
-1. **Create / import a wallet** (onboarding) — write down the 12-word phrase.
-2. **Fund from testnet** — new accounts start empty; tap **Fund from testnet** on Home (friendbot).
-3. **Register** — to *spend* (deposit/send/withdraw), an account does a one-time on-chain ASP
-   enrollment; the app prompts via the **Register** screen. Receiving needs no enrollment.
-4. **Deposit** (public) → **Send / Withdraw** (private). Each spend builds a ZK proof on-device
-   (~7 s) — that's the "proof moment" screen.
-5. **Switch faces any time** — tap or swipe the Public/Shielded slider on Home. Each mode keeps its
-   own activity feed and balance card.
-6. **Save contacts** on the People tab, then send straight to them from a chip — no address
-   copy-pasting, on either rail.
+Testnet, deployer/admin **`gate3`** = `GDFQA474KPZWWE4YAX6EAJVZHYO3SJR5DCQXV3U6GFDVMNNFZZ7UD2SD`.
+Circuit: `policy_tx_4_2` = `PolicyTransaction(4,2,1,1,10,10)` + Zcash-style nullifier-key split
+(17 public signals).
 
-## App structure
+| Contract | ID | WASM hash |
+|---|---|---|
+| **Pool** (native XLM, 4-in/2-out) | `CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV` | `40a3231a…` |
+| **Groth16 verifier** (our VK) | `CCQBC4XQQXFLRG25EMIBZ54TKKSGDK2NPK73TUTKDFHVF6S54XTIMZBY` | `bf60c5a7…` |
+| **ASP membership** (permissionless allowlist) | `CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH` | `9a250ad5…` |
+| **ASP non-membership** (blocklist) | `CB7MG5HSATWQ4S4C4TGWECCAIR66VM6M5KQEYOUCWUN6ZO5N3LBK4K7V` | `98458743…` |
 
-| Tab | What it shows |
-|---|---|
-| **Home** | The active mode's balance card, primary actions (Deposit/Send/Receive/Withdraw for Shielded; Send/Receive for Public), and a short activity preview. |
-| **Activity** | The full history for the active mode — public payments grouped by day with a tap-through to stellar.expert; shielded notes in leaf order (deposits, receives, sends). |
-| **People** | A local, on-device address book. Save a name against a public and/or shielded address; tap a contact to jump straight into Send with the recipient prefilled. |
-| **Settings** | Account switcher, recovery phrase, and encrypted Google Drive backup. |
+All four are built reproducibly from `vendor/contracts` (stellar-cli 25.1.0 `--optimize`, rustc 1.96.0) and source-verifiable on Stellar Expert via `.github/workflows/verify-contracts.yml`.
 
-## Deployed testnet contracts
+Explorer: `https://stellar.expert/explorer/testnet/contract/CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV`
 
-| Contract | ID |
-|---|---|
-| Pool (native XLM) | `CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU` |
-| Groth16 verifier | `CDT6PXNQQRIENHNI6FBQCD5AQN7FK6TEDSM7XWPLHDRRABCUOT4JB5GI` |
-| ASP membership (permissionless) | `CDPU2F73UKCYBXK7LRE25JAM7G7MZQANKZRIAEORKRJZSSPDK4CAE5A6` |
-| ASP non-membership | `CDH4LEBFJN5UHZ5GC5R2P5POXLWOJ4QTL7LS6RH4UKQ6JBVTC43I7ZRP` |
+### Example transactions
 
-## Notes
+> These landed on the **prior** pool deployment (`CAK4X4RK…`, since redeployed for
+> reproducible verification) and remain on-chain as reference. They demonstrate the
+> three flows; fresh examples on the current pool will be added after the next demo run.
 
-- **Relayer is off** (`USE_RELAYER = false` in `MainActivity.kt`). All ops self-submit and pay their
-  own gas — no relayer server needed. (Flip it on only if you host the `relayer/` service.)
-- Testnet only. Native XLM. Contracts are unaudited — do not use with real assets.
+| Flow | Tx hash | Submitted by |
+|---|---|---|
+| **Deposit** (public → pool) | [`10a9a947…f659e`](https://stellar.expert/explorer/testnet/tx/10a9a9475a0c9e72b7be655f873220563905f0441b0c2a2ed53e7f42c47f659e) | the account itself (self-submit) |
+| **Withdraw** (pool → `G…`) | [`27b3d2bd…485b5`](https://stellar.expert/explorer/testnet/tx/27b3d2bdda411389802bfa91392db42b8bdb183e271c12bc460c7176875485b5) | the account itself |
+| **Private send** (P2P) | [`1a7ce9a5…dec39`](https://stellar.expert/explorer/testnet/tx/1a7ce9a5dff41242f11ccfba72993e4a3aeea98b09c017111c51bff5f39dec39) | **relayer** `GD44DMEZ…55LUZ` — the wallet's account never appears |
+
+The private-send tx demonstrates source unlinkability: its on-chain `source_account` **and**
+`fee_account` are the relayer, not the sender's wallet.
+
+---
+
+<a name="demo"></a>
+## Demo
+
+_(demo video / walkthrough link — TODO)_
+
+For a deep dive into the cryptography, contracts, and full request traces, see
+**[walkthrough.md](walkthrough.md)**; for the viewing-key design, **[docs/full-viewing-key.md](docs/full-viewing-key.md)**.

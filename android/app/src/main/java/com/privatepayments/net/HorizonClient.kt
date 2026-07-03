@@ -107,6 +107,69 @@ object HorizonClient {
         return out
     }
 
+    /**
+     * Full native-XLM activity for [account], newest first — the Daylight feed.
+     *
+     * Unlike [recentPayments] (which only sees **classic** payment ops), this reads
+     * Horizon `/effects` and so also captures native balance changes driven by
+     * **Soroban contract invocations** — e.g. a shielded **withdraw** paying out to
+     * this account (a SAC `transfer`, invisible to `/payments`), or a deposit moving
+     * XLM into the pool. Effects carry no tx hash / counterparty, so we enrich each
+     * from a matching classic payment when there is one (deposits/withdraws stay
+     * hash-less and are labelled against the pool).
+     */
+    fun recentPublicActivity(url: String, account: String, limit: Int = 20): List<PublicPayment> {
+        val classic = runCatching { recentPayments(url, account, limit) }.getOrDefault(emptyList())
+        // Key a classic payment by (direction, amount, timestamp) so an effect can
+        // borrow its tx hash + counterparty.
+        val byKey = classic.associateBy { Triple(it.sent, it.amount, it.createdAt) }
+
+        val conn = URL("$url/accounts/$account/effects?order=desc&limit=$limit")
+            .openConnection() as HttpURLConnection
+        conn.connectTimeout = 10000
+        conn.readTimeout = 20000
+        val code = conn.responseCode
+        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader()?.use { it.readText() } ?: ""
+        conn.disconnect()
+        if (code !in 200..299) return classic   // effects unavailable → fall back to classic
+
+        val records = runCatching {
+            JSONObject(text).optJSONObject("_embedded")?.optJSONArray("records")
+        }.getOrNull() ?: return classic
+
+        val out = ArrayList<PublicPayment>()
+        for (i in 0 until records.length()) {
+            val r = records.optJSONObject(i) ?: continue
+            val (sent, raw) = when (r.optString("type")) {
+                "account_credited" -> {
+                    if (r.optString("asset_type") != "native") continue
+                    false to r.optString("amount")
+                }
+                "account_debited" -> {
+                    if (r.optString("asset_type") != "native") continue
+                    true to r.optString("amount")
+                }
+                // Initial friendbot funding: the new account is credited its balance.
+                "account_created" -> false to r.optString("starting_balance")
+                else -> continue
+            }
+            val amt = fmtAmount(raw, sent)
+            val createdAt = r.optString("created_at")
+            val match = byKey[Triple(sent, amt, createdAt)]
+            out.add(
+                PublicPayment(
+                    sent = sent,
+                    amount = amt,
+                    counterparty = match?.counterparty ?: "shielded pool",
+                    createdAt = createdAt,
+                    txHash = match?.txHash ?: "",
+                ),
+            )
+        }
+        return out
+    }
+
     /** "12.5" → "+12.5000" / "−12.5000". */
     private fun fmtAmount(raw: String, sent: Boolean): String {
         val v = raw.toDoubleOrNull() ?: 0.0

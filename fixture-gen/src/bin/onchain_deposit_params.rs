@@ -31,10 +31,10 @@ use zkhash::{
 };
 
 const LEVELS: usize = 10;
-const POOL: &str = "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC";
+const POOL: &str = "CDFXXZCDNFVQXMM6DUZWXHABGHCAWWXXA7T3IZYE7DY5ZLHKTR52VACV";
 const DEPOSIT_STROOPS: i128 = 1_000_000; // 0.1 XLM
 
-// Live ASP membership tree leaves at CBAC6AKBPK325WFTWXS3QRYBIDEFUGPC3ZZXMOW3JVTA4F5QSFRI5LF2,
+// Live ASP membership tree leaves at CALBHI3CBBMEQ4CC57NA4FFEMM26TUHZPFXPJJ3DOJ4GKTK7BZA352BH,
 // on-chain leaf order (indices 0,1,2), snapshotted from the hosted indexer
 // (`curl http://52.66.141.112/events?cursor=0&limit=300`, decoded via
 // `decode_asp_leaf`) on 2026-07-03. Index 2 is our scalar-102 test leaf.
