@@ -15,6 +15,7 @@
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat&logo=android&logoColor=white)](https://www.android.com/)
 [![Network: Testnet](https://img.shields.io/badge/Network-Testnet-orange?style=flat)](https://stellar.expert/explorer/testnet/contract/CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS)
 
+</div>
 
 A self-custodial **Android** wallet for **shielded payments** on the Stellar testnet. Built on
 Nethermind's privacy-pool Soroban contracts + Circom circuits, **forked and vendored in-repo**, with
