@@ -1,4 +1,20 @@
-# Stella — private payments wallet on Stellar
+<div align="center">
+
+<img src="screenshots/banner.png" width="480" alt="Stella" />
+
+**Private Payments Wallet on Stellar**
+
+*Public when you want it. Private when you need it. Proofs made in your pocket.*
+
+[![Built on Stellar](https://img.shields.io/badge/Built%20on-Stellar-7D00FF?style=flat&logo=stellar&logoColor=white)](https://stellar.org/)
+[![Soroban](https://img.shields.io/badge/Contracts-Soroban-FDDA24?style=flat&logo=stellar&logoColor=black)](https://developers.stellar.org/docs/build/smart-contracts)
+[![ZK: Groth16](https://img.shields.io/badge/ZK-Groth16%20on--device%20(~1.9s)-8A2BE2?style=flat)](https://github.com/NethermindEth/stellar-private-payments)
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9-7F52FF?style=flat&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=flat&logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
+[![Rust](https://img.shields.io/badge/Rust-prover%20·%20indexer%20·%20relayer-DEA584?style=flat&logo=rust&logoColor=black)](https://www.rust-lang.org/)
+[![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat&logo=android&logoColor=white)](https://www.android.com/)
+[![Network: Testnet](https://img.shields.io/badge/Network-Testnet-orange?style=flat)](https://stellar.expert/explorer/testnet/contract/CAYDRYKMO23GEBDSUP5QUM3G4CMOS7YX3TICYAES2N2IAEI3GA22EBMS)
+
 
 A self-custodial **Android** wallet for **shielded payments** on the Stellar testnet. Built on
 Nethermind's privacy-pool Soroban contracts + Circom circuits, **forked and vendored in-repo**, with
