@@ -1,3 +1,20 @@
 [workspace]
 members = ["prover-ffi", "fixture-gen", "indexer", "relayer"]
+# vendor/ is its own self-contained Cargo workspace (see vendor/Cargo.toml).
+# Without this exclude, Cargo treats every path dependency under vendor/ as
+# implicitly belonging to *this* workspace and ignores vendor/Cargo.toml's
+# own [workspace.package]/[workspace.dependencies], breaking `*.workspace = true`
+# inheritance in the vendored manifests.
+exclude = ["vendor"]
 resolver = "2"
+
+# Vendored fork of stellar-private-payments (circuits/prover/contracts) lives
+# under vendor/. This patch redirects every crate previously pulled from the
+# git dependency to the in-repo copy so cargo doesn't mix revisions.
+[patch."https://github.com/NethermindEth/stellar-private-payments"]
+prover = { path = "vendor/app/crates/core/prover" }
+types = { path = "vendor/app/crates/core/types" }
+disclosure = { path = "vendor/app/crates/core/disclosure" }
+circuits = { path = "vendor/circuits" }
+zkhash = { path = "vendor/poseidon2" }
+circuit-keys = { path = "vendor/circuit-keys" }

@@ -9,7 +9,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -56,6 +58,11 @@ data class DisclosureResult(
 /** The context (authority + purpose) the disclosure is bound to. */
 data class DisclosureRequest(val authority: String, val purpose: String)
 
+/** One selectable unspent note offered in the disclosure picker. */
+data class NoteOption(val leafIndex: Long, val amount: Long) {
+    val label: String get() = "${xlm(amount)} XLM"
+}
+
 /**
  * Phase 6 "share a payment proof" screen. The user names who/what the proof is
  * for (the context), the app proves ownership of a note bound to that context,
@@ -64,8 +71,8 @@ data class DisclosureRequest(val authority: String, val purpose: String)
  */
 @Composable
 fun DisclosureScreen(
-    spendableLabel: String,
-    runDisclosure: suspend (req: DisclosureRequest) -> DisclosureResult?,
+    notes: List<NoteOption>,
+    runDisclosure: suspend (req: DisclosureRequest, leafIndex: Long) -> DisclosureResult?,
     onClose: () -> Unit,
 ) {
     var authority by remember { mutableStateOf("") }
@@ -73,6 +80,8 @@ fun DisclosureScreen(
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<DisclosureResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Default to the largest unspent note; user can pick any other.
+    var selectedLeaf by remember(notes) { mutableStateOf(notes.maxByOrNull { it.amount }?.leafIndex) }
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize().umbraScreen().verticalScroll(rememberScrollState()).padding(24.dp)) {
@@ -87,8 +96,18 @@ fun DisclosureScreen(
             "Prove to a specific auditor or recipient that you hold a note of a given amount in the pool — without revealing your other notes, total balance, or history. This is NOT a proof you paid someone; it attests ownership of one note. Bound to who it's for + a fresh anti-replay nonce.",
             color = Umbra.TextMuted, fontSize = 13.sp, lineHeight = 19.sp,
         )
+        Spacer(Modifier.height(16.dp))
+
+        // Note picker — disclose ANY unspent note, not just the largest.
+        Text("Note to disclose", color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(8.dp))
-        Text("Proves you hold this note ($spendableLabel).", color = Umbra.TextFaint, fontSize = 12.sp)
+        if (notes.isEmpty()) {
+            Text("No unspent notes to disclose.", color = Umbra.TextFaint, fontSize = 13.sp)
+        } else {
+            notes.forEach { n ->
+                NoteRow(n, selected = n.leafIndex == selectedLeaf) { selectedLeaf = n.leafIndex; error = null; result = null }
+            }
+        }
         Spacer(Modifier.height(18.dp))
 
         LabeledField("Who is this for? (authority)", "e.g. Acme Auditors", authority) { authority = it; error = null }
@@ -100,7 +119,7 @@ fun DisclosureScreen(
         }
 
         Spacer(Modifier.height(18.dp))
-        val canGen = authority.isNotBlank() && purpose.isNotBlank() && !busy
+        val canGen = authority.isNotBlank() && purpose.isNotBlank() && selectedLeaf != null && !busy
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                 .background(if (canGen) Umbra.Primary else Umbra.SurfaceElevated)
@@ -108,7 +127,7 @@ fun DisclosureScreen(
                     busy = true; error = null; result = null
                     scope.launch {
                         try {
-                            result = runDisclosure(DisclosureRequest(authority.trim(), purpose.trim()))
+                            result = runDisclosure(DisclosureRequest(authority.trim(), purpose.trim()), selectedLeaf!!)
                                 ?: run { error = "Couldn't generate proof"; null }
                         } catch (e: Exception) {
                             error = e.message ?: "Disclosure failed"
@@ -130,6 +149,25 @@ fun DisclosureScreen(
             contentAlignment = Alignment.Center,
         ) { Text("Close", color = Umbra.TextSecondary, fontWeight = FontWeight.Medium) }
         Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun NoteRow(note: NoteOption, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Umbra.Primary.copy(alpha = 0.16f) else Umbra.Surface)
+            .clickable(onClick = onClick).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked, null,
+            tint = if (selected) Umbra.Primary else Umbra.TextFaint, modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(note.label, color = Umbra.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.weight(1f))
+        Text("#${note.leafIndex}", color = Umbra.TextFaint, fontSize = 12.sp, fontFamily = Umbra.Mono)
     }
 }
 
@@ -171,7 +209,7 @@ private fun ReceiptCard(r: DisclosureResult) {
         CheckRow("Proven under a known pool root", r.knownRoot)
         CheckRow("Amount matches the proven note", r.amountVerified)
         Spacer(Modifier.height(12.dp))
-        ReceiptRow("Note amount", "%.4f XLM".format(r.amount.toLongOrNull()?.div(1e7) ?: 0.0))
+        ReceiptRow("Note amount", "${r.amount.toLongOrNull()?.let { xlm(it) } ?: "0.0000"} XLM")
         ReceiptRow("For", r.authority)
         ReceiptRow("Purpose", r.purpose)
         ReceiptRow("Commitment", "${r.noteCommitment.take(10)}…")

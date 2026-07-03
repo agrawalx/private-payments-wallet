@@ -30,10 +30,20 @@ use zkhash::{
 const LEVELS: usize = 10;
 const AMOUNT: i128 = 1_000_000; // the 0.1 XLM note we deposited
 const RECIPIENT: &str = "GDFQA474KPZWWE4YAX6EAJVZHYO3SJR5DCQXV3U6GFDVMNNFZZ7UD2SD"; // gate3
-// Commitments our deposit emitted (NewCommitmentEvent index 0 and 1).
+// Commitments our deposit (tx 10a9a9475a0c9e72b7be655f873220563905f0441b0c2a2ed53e7f42c47f659e,
+// into the new pool CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC) emitted
+// (NewCommitmentEvent index 0 and 1), decoded via `decode_nullifier_topic` on 2026-07-03.
 const COMM0: &str = "18263061230805500442272313235592384331733893249443814861628842931597516851047";
-const COMM1: &str = "12401823200749646421033992859594403456934209749448747537236696806596108078728";
-const POOL_ROOT: &str = "3514251768228847094985112314210957224672543973832672226492934516686576471621";
+const COMM1: &str = "21158080344800240816300532316086569362445313206198807210561088406377156083599";
+const POOL_ROOT: &str = "4051697079123744283342357277046060981093496486031259126841379961128596812563";
+
+// Live ASP membership tree leaves (see onchain_deposit_params.rs for the fetch
+// details/date); our scalar-102 leaf is at index 2.
+const ASP_LEAVES: [&str; 3] = [
+    "9994517823975672122284466930373335370852567112864722324125744549747666024239",
+    "2265510885976041928383517713406139983991156639540722924781593281193278186508",
+    "17969525783030368157502924498519760117548348265060813172074119923679683982433",
+];
 
 fn field_from_scalar(s: Scalar) -> Field {
     let mut b = s.into_bigint().to_bytes_le();
@@ -63,7 +73,7 @@ fn main() -> Result<()> {
     let note_pub = NotePublicKey(pubkey);
 
     let sig = KeyDerivationSignature((0..64u8).collect());
-    let (_n, enc_kp) = derive_encryption_and_note_keypairs(sig)?;
+    let (_n, enc_kp, _nk) = derive_encryption_and_note_keypairs(sig)?;
     let enc_pub = EncryptionPublicKey(enc_kp.public.0);
 
     // Input note: amount 0.1 XLM, blinding [5;32] (the deposit output0 blinding).
@@ -94,13 +104,22 @@ fn main() -> Result<()> {
         merkle_path_indices: field_from_scalar(Scalar::from(path_idx)),
     };
 
-    // ASP membership (our leaf, root = WITH_LEAF root) + empty-SMT non-membership.
+    // ASP membership: our leaf, now at index 2 of the live tree (indices 0,1
+    // are other on-chain LeafAdded events; see ASP_LEAVES above) + empty-SMT
+    // non-membership.
     let blinding0 = Field::try_from_le_bytes([0u8; 32])?;
     let leaf = asp_membership_leaf(&note_pub, &blinding0)?;
     let mut mem_leaves = vec![zl; 1usize << LEVELS];
-    mem_leaves[0] = scalar_from_field(&leaf);
+    mem_leaves[0] = scalar_from_dec(ASP_LEAVES[0]);
+    mem_leaves[1] = scalar_from_dec(ASP_LEAVES[1]);
+    mem_leaves[2] = scalar_from_field(&leaf);
     let mem_root = merkle_root(mem_leaves.clone());
-    let (msib, mpi, _) = merkle_proof(&mem_leaves, 0);
+    assert_eq!(
+        scalar_to_bigint(mem_root).to_string(),
+        "7650851037732131397668132823701172848267506844599464976150678500985807912790",
+        "recomputed mem_root != live on-chain ASP root"
+    );
+    let (msib, mpi, _) = merkle_proof(&mem_leaves, 2);
     let membership = AspMembershipProof {
         leaf,
         blinding: blinding0,

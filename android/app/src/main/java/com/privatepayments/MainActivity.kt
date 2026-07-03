@@ -56,12 +56,14 @@ import com.privatepayments.state.NoteStore
 import com.privatepayments.state.WalletBackup
 import com.privatepayments.ui.ActivityScreen
 import com.privatepayments.ui.AmountScreen
+import com.privatepayments.ui.AuditScreen
 import com.privatepayments.ui.BackupScreen
 import com.privatepayments.ui.DisclosureResult
 import com.privatepayments.ui.DisclosureScreen
 import com.privatepayments.ui.HomeScreen
 import com.privatepayments.ui.HomeTab
 import com.privatepayments.ui.PeopleScreen
+import com.privatepayments.ui.PendingTx
 import com.privatepayments.ui.ProofScreen
 import com.privatepayments.ui.ReceiveScreen
 import com.privatepayments.ui.ConfirmScreen
@@ -70,8 +72,14 @@ import com.privatepayments.ui.RecoveryScreen
 import com.privatepayments.ui.RegisterScreen
 import com.privatepayments.ui.SettingsScreen
 import com.privatepayments.ui.SplashScreen
+import com.privatepayments.ui.SuccessScreen
+import com.privatepayments.ui.SyncState
+import com.privatepayments.ui.SyncStatus
+import com.privatepayments.ui.TxDetailScreen
+import com.privatepayments.ui.ViewingKeyScreen
 import com.privatepayments.ui.copyToClipboard
 import com.privatepayments.ui.openUrl
+import com.privatepayments.ui.rememberHaptics
 import kotlinx.coroutines.CompletableDeferred
 import uniffi.prover_ffi.SelectedNote
 import uniffi.prover_ffi.accountBalanceStroops
@@ -111,22 +119,33 @@ import uniffi.prover_ffi.deriveKeys
 import uniffi.prover_ffi.issueDisclosureReceipt
 import uniffi.prover_ffi.verifyDisclosureReceipt
 import uniffi.prover_ffi.finalizeAndSign
-import uniffi.prover_ffi.provePolicyTx22Json
+import uniffi.prover_ffi.provePolicyTx42Json
+import uniffi.prover_ffi.provePolicyTx42JsonRapidsnark
 import uniffi.prover_ffi.rebuildInputPath
 import uniffi.prover_ffi.scanNote
+import uniffi.prover_ffi.warmUpProvers
 
-private const val POOL_ID = "CDVEICETZZERI7M3OSHQVT5YWXROK4EYC42KM52CUKCCXUXIUYBFJZQU"
-private const val ASP_MEMBERSHIP_ID = "CDPU2F73UKCYBXK7LRE25JAM7G7MZQANKZRIAEORKRJZSSPDK4CAE5A6"
+private const val POOL_ID = "CAK4X4RKCWPRFD467VRK663PVVA5ZWYFHOUUEQDAQWATAZECO3ETSTIC"
+private const val ASP_MEMBERSHIP_ID = "CBAC6AKBPK325WFTWXS3QRYBIDEFUGPC3ZZXMOW3JVTA4F5QSFRI5LF2"
 private const val RPC_URL = "https://soroban-testnet.stellar.org"
 
 // Route withdraw/transfer through the relayer (its account is the on-chain
 // source/sender/fee-payer) so this wallet's public account stays unlinkable.
-// Requires the relayer service reachable at RelayerClient.BASE (adb reverse
-// tcp:8090). When false, the wallet self-submits all ops from its own account
-// (pays its own gas) — no relayer server needed. Deposit always self-submits.
-private const val USE_RELAYER = false
+// Requires the relayer service reachable at RelayerClient.BASE (the hosted
+// EC2 relayer). When false, the wallet self-submits all ops from its own
+// account (pays its own gas) — no relayer server needed. Deposit always
+// self-submits.
+private const val USE_RELAYER = true
 
-private enum class Screen { Splash, Onboarding, Home, Amount, Confirm, Proof, Success, Recovery, Disclosure, Backup, Settings, Receive, Register, PublicSend, PublicConfirm, PublicSending }
+// Task B6 verification flag: prove with the rapidsnark native backend
+// (behind the prover-ffi `rapidsnark` cargo feature) instead of the cached
+// arkworks `Prover`, to compare on-device timing/feasibility. Requires the
+// .so to be built with `--features rapidsnark` and the zkey asset bundled —
+// NOT the shipped default. Leave false for normal builds.
+private const val USE_RAPIDSNARK = true
+private const val RAPIDSNARK_ZKEY_ASSET = "policy_tx_4_2_final.zkey"
+
+private enum class Screen { Splash, Onboarding, Home, Amount, Confirm, Proof, Success, Recovery, Disclosure, Backup, Settings, Receive, Register, PublicSend, PublicConfirm, PublicSending, TxDetail, ViewingKey, AuditScan }
 
 /**
  * A shielded primitive the app can run on-device. The amount (and recipient,
@@ -156,6 +175,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         InsecureTls.installGlobally()
+
+        // Warm the embedded ZK provers off the critical path — first proof drops
+        // from ~7s to ~3.6s when the 13MB of keys are already deserialized.
+        Thread { runCatching { warmUpProvers() } }.start()
 
         // Per-op params templates (live-rebuilt in-app before each tx).
         val params: Map<Op, String> = Op.entries.associateWith { op ->
@@ -200,8 +223,17 @@ class MainActivity : ComponentActivity() {
             val revealScope = rememberCoroutineScope()
 
             fun triggerModeChange(newMode: WalletMode, anchorWindow: Offset) {
-                if (newMode == walletMode) return
-                val from = walletMode
+                // Read the CURRENT mode from the `publicMode` state, never the
+                // enclosing `walletMode` val: this fn is passed down as a
+                // `::triggerModeChange` reference, which Compose memoizes — a
+                // closure that captured `walletMode` keeps the value from the
+                // composition that created it, so after one switch the compare
+                // below silently no-ops every tap back to that mode (the
+                // "slider dead until you change tabs" bug). `publicMode` is a
+                // snapshot-state read, always current through any stale closure.
+                val current = if (publicMode) WalletMode.Public else WalletMode.Shielded
+                if (newMode == current) return
+                val from = current
                 val center = anchorWindow - rootOrigin
                 val w = rootSize.width.toFloat()
                 val h = rootSize.height.toFloat()
@@ -215,9 +247,16 @@ class MainActivity : ComponentActivity() {
                 revealFrom = from
                 publicMode = newMode == WalletMode.Public
                 revealScope.launch {
-                    revealRadius.snapTo(0f)
-                    revealRadius.animateTo(revealMax, tween(520, easing = FastOutSlowInEasing))
-                    revealFrom = null
+                    // `finally` guarantees the overlay is torn down even if this
+                    // animateTo is cancelled by a re-entrant switch — otherwise
+                    // `revealFrom` stays non-null and the invisible overlay eats
+                    // every future tap (Modifier.clip doesn't clip hit-testing).
+                    try {
+                        revealRadius.snapTo(0f)
+                        revealRadius.animateTo(revealMax, tween(520, easing = FastOutSlowInEasing))
+                    } finally {
+                        revealFrom = null
+                    }
                 }
             }
 
@@ -242,6 +281,9 @@ class MainActivity : ComponentActivity() {
                     // Success-screen verb override (e.g. a classic public send → "Sent");
                     // null falls back to the pool op's verb.
                     var sentVerb by remember { mutableStateOf<String?>(null) }
+                    // On-device ZK proving time for the just-completed op (null for
+                    // the classic public-send path, which has no proof step).
+                    var lastProofMs by remember { mutableStateOf<Long?>(null) }
                     // Daylight (public) activity: classic XLM sends/receives from Horizon.
                     var publicActivity by remember { mutableStateOf<List<com.privatepayments.ui.Activity>>(emptyList()) }
                     // Blinding of the note created by an in-flight deposit; recorded
@@ -319,7 +361,16 @@ class MainActivity : ComponentActivity() {
                             "Restored $n note(s) from your Google Drive backup."
                         }
                     }
-                    var sync by remember { mutableStateOf("Connecting to indexer…") }
+                    var sync by remember { mutableStateOf(SyncStatus(SyncState.Syncing, "Connecting to indexer…")) }
+                    // Bump to force an immediate re-poll (the banner's "Retry").
+                    var syncEpoch by remember { mutableStateOf(0) }
+                    // True once the poll loop has reached the indexer at least once —
+                    // gates the empty-state skeletons (no data yet vs. genuinely empty).
+                    var hasSyncedOnce by remember { mutableStateOf(false) }
+                    // Last relayer /health check (every 6th poll) — surfaced as a
+                    // warning on Confirm before a relayed (non-deposit) send.
+                    var relayerOk by remember { mutableStateOf<Boolean?>(null) }
+                    var selectedActivity by remember { mutableStateOf<com.privatepayments.ui.Activity?>(null) }
 
                     // Self-serve ASP enrollment ("Register"): submit an `insert_leaf`
                     // of this account's note leaf, signed by the account itself (the
@@ -341,7 +392,7 @@ class MainActivity : ComponentActivity() {
                         while (tries < 10 && !ok) {
                             val d = withContext(Dispatchers.IO) { IndexerClient.fetchSince(chainStore.cursor()) }
                             if (d.reachable) {
-                                d.commitments.forEach { chainStore.appendCommitment(it.seq, it.commitmentTopic, it.value) }
+                                d.commitments.forEach { chainStore.appendCommitment(it.seq, it.commitmentTopic, it.value, it.closedAt) }
                                 d.leaves.forEach { lv ->
                                     runCatching { decodeAspLeaf(lv.value) }.getOrNull()?.let { chainStore.appendAspLeaf(lv.seq, it) }
                                 }
@@ -370,17 +421,35 @@ class MainActivity : ComponentActivity() {
                     // Live sync (Phase 3 state layer): poll the indexer → scan
                     // commitments into durable notes → record on-chain nullifiers
                     // → reconcile (mark spent) → balance = unspent notes only.
-                    LaunchedEffect(accountEpoch) {
+                    LaunchedEffect(accountEpoch, syncEpoch) {
+                        var iter = 0
                         while (true) {
+                            iter++
                             // 0. Pull only the DELTA since our durable cursor, append it to
                             //    the global chain mirror (no more full re-fetch every poll).
                             val delta = withContext(Dispatchers.IO) { IndexerClient.fetchSince(chainStore.cursor()) }
+                            if (delta.reachable) hasSyncedOnce = true
+                            // Cheap liveness check on the relayer, every 6th poll only.
+                            if (iter % 6 == 0) {
+                                relayerOk = withContext(Dispatchers.IO) { RelayerClient.health() }
+                            }
                             val sk = shielded
                             if (delta.reachable && sk != null) {
                                 withContext(Dispatchers.Default) {
-                                    delta.commitments.forEach { chainStore.appendCommitment(it.seq, it.commitmentTopic, it.value) }
+                                    delta.commitments.forEach { chainStore.appendCommitment(it.seq, it.commitmentTopic, it.value, it.closedAt, it.eventId) }
                                     delta.leaves.forEach { lv ->
                                         runCatching { decodeAspLeaf(lv.value) }.getOrNull()?.let { chainStore.appendAspLeaf(lv.seq, it) }
+                                    }
+                                    // Decode + record new on-chain nullifiers into the chain
+                                    // mirror BEFORE scanning commitments below, so a commitment
+                                    // from the same tx as one of our own spends (change) can be
+                                    // recognized on first sight (indexer emits nullifiers before
+                                    // commitments within a tx).
+                                    val seen = delta.nullifiers.mapNotNull { nf ->
+                                        runCatching { decodeNullifierTopic(nf.topic) }.getOrNull()?.let { dec ->
+                                            chainStore.appendNullifier(nf.seq, dec, nf.eventId, nf.closedAt)
+                                            dec to nf.closedAt
+                                        }
                                     }
                                     chainStore.setCursor(delta.newCursor)
                                     // Full ordered lists (from local DB) feed proving.
@@ -389,25 +458,43 @@ class MainActivity : ComponentActivity() {
                                     // 1. Scan only commitments THIS account hasn't seen yet,
                                     //    with its per-seed keys. (On account switch, scannedSeq=0
                                     //    → it rescans everything once.)
+                                    // Spend-netting: a newly-scanned note is "change" if its
+                                    // creating tx also spent one of the nullifiers of a note we
+                                    // already own — i.e. we're both the sender and the receiver.
+                                    val ownNullifiers = noteStore.notes().map { it.nullifier }.toSet()
+                                    val ownSpendTxPrefixes = chainStore.eventIdPrefixesForNullifiers(ownNullifiers)
                                     val from = chainStore.scannedSeq(walletManager.activeIndex)
                                     chainStore.commitmentsSince(from).forEach { ev ->
                                         runCatching {
                                             scanNote(ev.topic, ev.value, sk.encryptionPrivate, sk.notePrivate)
                                         }.getOrNull()?.let { note ->
+                                            val isChange = ev.eventId.isNotBlank() &&
+                                                ev.eventId.substringBeforeLast('-') in ownSpendTxPrefixes
                                             noteStore.upsertNote(
                                                 note.leafIndex.toLong(), note.commitment,
                                                 note.amount.toLong(), note.nullifier, note.blinding,
+                                                ev.closedAt, isChange,
                                             )
                                         }
                                     }
                                     chainStore.setScannedSeq(walletManager.activeIndex, chainStore.cursor())
-                                    // 2. Record new on-chain nullifiers, then reconcile.
-                                    val seen = delta.nullifierTopics.mapNotNull {
-                                        runCatching { decodeNullifierTopic(it) }.getOrNull()
-                                    }
+                                    // 2. Reconcile: mark spent notes from the nullifiers just recorded.
                                     noteStore.addNullifiers(seen)
                                     noteStore.reconcile()
-                                    wallet.applyNotes(noteStore.unspentBalanceStroops(), noteStore.notes())
+                                    val notesNow = noteStore.notes()
+                                    wallet.applyNotes(noteStore.unspentBalanceStroops(), notesNow)
+                                    // Clear shielded pending entries once the note store has
+                                    // moved past the snapshot taken at creation, or after 60s.
+                                    val nowMs = System.currentTimeMillis()
+                                    val noteCount = notesNow.size
+                                    val spentCount = notesNow.count { it.spent }
+                                    wallet.pending.removeAll { p ->
+                                        !p.isPublic && (
+                                            nowMs - p.createdAtMs > 60_000L ||
+                                                noteCount != p.noteCountAtCreation ||
+                                                spentCount != p.spentCountAtCreation
+                                            )
+                                    }
                                 }
                             }
                             // Public (Stellar account) XLM balance.
@@ -423,9 +510,17 @@ class MainActivity : ComponentActivity() {
                             }
                             val c = noteStore.counts()
                             sync = when {
-                                !delta.reachable -> "Indexer unreachable"
-                                publicError != null -> "Public balance error: $publicError"
-                                else -> "Synced · ${chainStore.commitmentCount()} commitments · ${c.unspent} unspent / ${c.spent} spent note(s)"
+                                !delta.reachable -> SyncStatus(
+                                    SyncState.Unreachable,
+                                    "Can't reach the network — balances may be stale",
+                                    relayerOk,
+                                )
+                                publicError != null -> SyncStatus(SyncState.Unreachable, "Public balance error: $publicError", relayerOk)
+                                else -> SyncStatus(
+                                    SyncState.Ok,
+                                    "Synced · ${chainStore.commitmentCount()} commitments · ${c.unspent} unspent / ${c.spent} spent note(s)",
+                                    relayerOk,
+                                )
                             }
                             delay(5000)
                         }
@@ -447,13 +542,20 @@ class MainActivity : ComponentActivity() {
                                     private = false,
                                     amount = "${p.amount} XLM",
                                     positive = !p.sent,
-                                    time = p.createdAt.take(10),
+                                    time = com.privatepayments.ui.dateOf(p.createdAt),
                                     subtitle = (if (p.sent) "To " else "From ") +
-                                        if (p.counterparty.length > 12) "${p.counterparty.take(6)}…${p.counterparty.takeLast(4)}" else p.counterparty,
+                                        com.privatepayments.ui.shortAddress(p.counterparty),
                                     url = p.txHash.takeIf { it.isNotEmpty() }
                                         ?.let { "https://stellar.expert/explorer/testnet/tx/$it" },
+                                    kind = if (p.sent) com.privatepayments.ui.ActivityKind.PublicSent
+                                    else com.privatepayments.ui.ActivityKind.PublicReceived,
+                                    timestamp = p.createdAt,
+                                    txHash = p.txHash.takeIf { it.isNotEmpty() },
                                 )
                             }
+                            // The refresh completed — any public pending entries are now
+                            // either reflected above or gone; either way, stop showing them.
+                            wallet.pending.removeAll { it.isPublic }
                         }
                     }
 
@@ -470,9 +572,14 @@ class MainActivity : ComponentActivity() {
                     // Spending requires ASP enrollment — route unregistered accounts
                     // through Register first (receiving needs no enrollment).
                     val start: (Op) -> Unit = { chosen ->
-                        if (walletAddr != null) { op = chosen; prefillRecipient = ""; screen = if (isRegistered) Screen.Amount else Screen.Register }
+                        if (walletAddr != null) {
+                            // Idempotent — re-warms in case onCreate's warm-up hasn't
+                            // finished yet by the time the user reaches Send.
+                            Thread { runCatching { warmUpProvers() } }.start()
+                            op = chosen; prefillRecipient = ""; screen = if (isRegistered) Screen.Amount else Screen.Register
+                        }
                     }
-                    val amountXlm = "%.4f".format(pendingAmount / 1e7)
+                    val amountXlm = com.privatepayments.ui.xlm(pendingAmount)
 
                     // Tapping a contact's "Send public"/"Send shielded" chip (Track D):
                     // prefill the recipient and route into the same Send flows as the
@@ -485,6 +592,30 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    // Private/public pending entries rendered as fake "Confirming…"
+                    // Activity rows, prepended ahead of the real (reconciled) history.
+                    fun pendingToActivity(p: PendingTx): com.privatepayments.ui.Activity {
+                        val isDeposit = p.title == Op.Deposit.verb
+                        return com.privatepayments.ui.Activity(
+                            icon = if (isDeposit) Icons.Filled.SouthWest else Icons.Filled.NorthEast,
+                            title = p.title,
+                            private = !p.isPublic,
+                            amount = com.privatepayments.ui.signedXlm(p.amountStroops, negative = !isDeposit),
+                            positive = isDeposit,
+                            time = "",
+                            subtitle = "Confirming…",
+                            pending = true,
+                            kind = when {
+                                p.isPublic -> com.privatepayments.ui.ActivityKind.PublicSent
+                                isDeposit -> com.privatepayments.ui.ActivityKind.Deposit
+                                else -> com.privatepayments.ui.ActivityKind.Transferred
+                            },
+                        )
+                    }
+                    val onActivityTap: (com.privatepayments.ui.Activity) -> Unit = {
+                        selectedActivity = it; screen = Screen.TxDetail
+                    }
+
                     // Renders the Home/Activity/People tab family for an EXPLICIT
                     // mode (not necessarily the live `walletMode`) — this lets the
                     // reveal transition render the old face a second time, frozen,
@@ -492,13 +623,16 @@ class MainActivity : ComponentActivity() {
                     @Composable
                     fun RenderHomeFamily(mode: WalletMode, onModeChangeRequest: (WalletMode, Offset) -> Unit) {
                         val topAddress = if (mode == WalletMode.Public) (walletAddr ?: "") else (shieldedAddr ?: walletAddr ?: "")
+                        val shieldedActivity = wallet.pending.filter { !it.isPublic }.map(::pendingToActivity) + wallet.activity
+                        val daylightActivity = wallet.pending.filter { it.isPublic }.map(::pendingToActivity) + publicActivity
+                        val initialSyncing = !hasSyncedOnce && wallet.activity.isEmpty()
                         when (homeTab) {
                             HomeTab.Home -> HomeScreen(
                                 address = topAddress,
                                 accountLabel = accountLabel,
                                 balanceText = wallet.balanceText(),
                                 publicText = wallet.publicText(),
-                                activity = wallet.activity,
+                                activity = shieldedActivity,
                                 syncStatus = sync,
                                 onSend = { start(Op.Transfer) },
                                 onDeposit = { start(Op.Deposit) },
@@ -512,18 +646,25 @@ class MainActivity : ComponentActivity() {
                                 mode = mode,
                                 onModeChange = onModeChangeRequest,
                                 onPublicSend = { if (walletAddr != null) { prefillRecipient = ""; screen = Screen.PublicSend } },
-                                publicActivity = publicActivity,
+                                publicActivity = daylightActivity,
                                 onSelectTab = { homeTab = it },
+                                onActivityTap = onActivityTap,
+                                onRetrySync = { syncEpoch++ },
+                                initialSyncing = initialSyncing,
                             )
                             HomeTab.Activity -> ActivityScreen(
                                 address = topAddress,
                                 accountLabel = accountLabel,
                                 mode = mode,
                                 onModeChange = onModeChangeRequest,
-                                activity = wallet.activity,
-                                publicActivity = publicActivity,
+                                activity = shieldedActivity,
+                                publicActivity = daylightActivity,
                                 onSettings = { screen = Screen.Settings },
                                 onSelectTab = { homeTab = it },
+                                onActivityTap = onActivityTap,
+                                syncStatus = sync,
+                                onRetrySync = { syncEpoch++ },
+                                initialSyncing = initialSyncing,
                             )
                             HomeTab.People -> PeopleScreen(
                                 address = topAddress,
@@ -535,10 +676,13 @@ class MainActivity : ComponentActivity() {
                                     contactsEpoch++
                                 },
                                 onRemoveContact = { id -> contactStore.remove(id); contactsEpoch++ },
+                                onUpdateContact = { c -> contactStore.update(c); contactsEpoch++ },
                                 onSendToPublic = { addr -> sendToContact(addr, true) },
                                 onSendToShielded = { addr -> sendToContact(addr, false) },
                                 onSettings = { screen = Screen.Settings },
                                 onSelectTab = { homeTab = it },
+                                syncStatus = sync,
+                                onRetrySync = { syncEpoch++ },
                             )
                         }
                     }
@@ -558,11 +702,14 @@ class MainActivity : ComponentActivity() {
                         ) {
                             // Bottom layer: always the live, current mode.
                             RenderHomeFamily(walletMode, ::triggerModeChange)
-                            // Top layer: only while revealing — the OLD mode, frozen,
-                            // clipped to everywhere except the growing circle so the
-                            // live layer underneath shows through as it expands.
+                            // Top layer: only while the wipe is ACTIVELY animating —
+                            // the OLD mode, frozen, clipped to everywhere except the
+                            // growing circle so the live layer underneath shows
+                            // through. Gating on `isRunning` (not just `revealFrom`)
+                            // means a cancelled/stranded animation can never leave a
+                            // full-screen interactive overlay eating taps.
                             val from = revealFrom
-                            if (from != null) {
+                            if (from != null && revealRadius.isRunning) {
                                 CompositionLocalProvider(LocalUmbraColors provides paletteFor(from)) {
                                     Box(
                                         Modifier.fillMaxSize()
@@ -589,7 +736,7 @@ class MainActivity : ComponentActivity() {
                             title = "Send XLM",
                             isPublic = true,
                             amountXlm = amountXlm,
-                            recipient = if (pendingRecipient.length > 16) "${pendingRecipient.take(10)}…${pendingRecipient.takeLast(6)}" else pendingRecipient,
+                            recipient = com.privatepayments.ui.shortAddress(pendingRecipient, 10, 6),
                             typeLabel = "Public payment · classic XLM",
                             onConfirm = { screen = Screen.PublicSending },
                             onCancel = { screen = Screen.PublicSend },
@@ -602,7 +749,15 @@ class MainActivity : ComponentActivity() {
                                 val signed = buildSignedPayment(addr, entryXdr, pendingRecipient, pendingAmount, "", walletManager.secret())
                                 HorizonClient.submit(HorizonClient.TESTNET_URL, signed)
                             },
-                            onDone = { hash -> sentVerb = "Sent"; txHash = hash; screen = Screen.Success },
+                            onDone = { hash ->
+                                wallet.pending.add(
+                                    PendingTx(
+                                        id = System.nanoTime(), title = "Sent", amountStroops = pendingAmount,
+                                        isPublic = true, createdAtMs = System.currentTimeMillis(),
+                                    ),
+                                )
+                                sentVerb = "Sent"; txHash = hash; lastProofMs = null; screen = Screen.Success
+                            },
                             onCancel = { screen = Screen.Home },
                         )
                         Screen.Amount -> AmountScreen(
@@ -624,8 +779,7 @@ class MainActivity : ComponentActivity() {
                             recipient = when {
                                 op == Op.Deposit -> "Shielded pool"
                                 op == Op.Transfer && pendingRecipient.isBlank() -> "Yourself (re-shield)"
-                                pendingRecipient.length > 16 -> "${pendingRecipient.take(10)}…${pendingRecipient.takeLast(6)}"
-                                else -> pendingRecipient
+                                else -> com.privatepayments.ui.shortAddress(pendingRecipient, 10, 6)
                             },
                             typeLabel = when (op) {
                                 Op.Deposit -> "Public deposit"
@@ -634,6 +788,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onConfirm = { screen = Screen.Proof },
                             onCancel = { screen = Screen.Amount },
+                            warning = if (op != Op.Deposit && relayerOk == false)
+                                "Relayer unreachable — this private send may fail" else null,
                         )
                         Screen.Proof -> ProofScreen(
                             title = op.title,
@@ -694,7 +850,17 @@ class MainActivity : ComponentActivity() {
                                         Op.Transfer -> assembleTransfer(paramsJson)
                                     }
                                 }
-                                val bundle = withContext(Dispatchers.Default) { provePolicyTx22Json(a.circuitInputsJson) }
+                                val bundle = withContext(Dispatchers.Default) {
+                                    if (USE_RAPIDSNARK) {
+                                        val zkeyPath = ensureRapidsnarkZkey(applicationContext)
+                                        val t0 = System.nanoTime()
+                                        val b = provePolicyTx42JsonRapidsnark(a.circuitInputsJson, zkeyPath)
+                                        android.util.Log.d("StellaProve", "rapidsnark prove: ${(System.nanoTime() - t0) / 1_000_000}ms")
+                                        b
+                                    } else {
+                                        provePolicyTx42Json(a.circuitInputsJson)
+                                    }
+                                }
                                 advance(2)
                                 val hash = withContext(Dispatchers.IO) {
                                     // Withdraw/transfer go through the relayer so the
@@ -725,14 +891,25 @@ class MainActivity : ComponentActivity() {
                                 advance(3)
                                 hash
                             },
-                            onDone = { hash ->
+                            onDone = { hash, proofMs ->
                                 if (op == Op.Deposit) pendingDepositBlinding?.let { noteStore.recordDepositBlinding(it) }
                                 pendingDepositBlinding = null
-                                txHash = hash; screen = Screen.Success
+                                val notesNow = noteStore.notes()
+                                wallet.pending.add(
+                                    PendingTx(
+                                        id = System.nanoTime(), title = op.verb, amountStroops = pendingAmount,
+                                        isPublic = false, createdAtMs = System.currentTimeMillis(),
+                                        noteCountAtCreation = notesNow.size,
+                                        spentCountAtCreation = notesNow.count { it.spent },
+                                    ),
+                                )
+                                txHash = hash; lastProofMs = proofMs; screen = Screen.Success
                             },
                             onCancel = { screen = Screen.Home },
                         )
-                        Screen.Success -> SuccessScreen(sentVerb ?: op.verb, amountXlm, txHash) { sentVerb = null; screen = Screen.Home }
+                        Screen.Success -> SuccessScreen(sentVerb ?: op.verb, amountXlm, txHash, lastProofMs) { sentVerb = null; screen = Screen.Home }
+                        Screen.TxDetail -> selectedActivity?.let { TxDetailScreen(it) { screen = Screen.Home } }
+                            ?: run { screen = Screen.Home }
                         Screen.Register -> RegisterScreen(
                             onRegister = doRegister,
                             onRegistered = { screen = Screen.Home },
@@ -754,6 +931,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onRecovery = { screen = Screen.Recovery },
                             onBackup = { screen = Screen.Backup },
+                            onViewingKey = { if (shielded != null) screen = Screen.ViewingKey },
+                            onAudit = { screen = Screen.AuditScan },
                             onClose = { screen = Screen.Home },
                         )
                         Screen.Recovery -> RecoveryScreen(
@@ -773,16 +952,18 @@ class MainActivity : ComponentActivity() {
                             onClose = { screen = Screen.Recovery },
                         )
                         Screen.Disclosure -> {
-                            // Disclosure proves a SINGLE note — show that note's amount.
-                            val largest = noteStore.unspentNotes().maxOfOrNull { it.amount } ?: 0L
+                            // Disclosure proves a SINGLE note — the user picks which one.
+                            val discNotes = noteStore.unspentNotes()
+                                .sortedByDescending { it.amount }
+                                .map { com.privatepayments.ui.NoteOption(it.leafIndex, it.amount) }
                             DisclosureScreen(
-                                spendableLabel = "%.4f XLM".format(largest / 1e7),
-                                // Canonical privacy-pool disclosure: prove the largest unspent
+                                notes = discNotes,
+                                // Canonical privacy-pool disclosure: prove the SELECTED unspent
                                 // note bound to {authority, purpose, fresh anti-replay nonce},
                                 // then run the 3-part verify (proof ∧ context ∧ known-root).
-                                runDisclosure = { req ->
+                                runDisclosure = { req, leafIndex ->
                                     withContext(Dispatchers.Default) {
-                                        val note = noteStore.unspentNotes().maxByOrNull { it.amount }
+                                        val note = noteStore.unspentNotes().firstOrNull { it.leafIndex == leafIndex }
                                             ?: return@withContext null
                                         val sk = shielded ?: return@withContext null
                                         // Fresh nonce so each receipt is single-use (in a real
@@ -818,50 +999,28 @@ class MainActivity : ComponentActivity() {
                                 onClose = { screen = Screen.Home },
                             )
                         }
+                        Screen.ViewingKey -> {
+                            val sk = shielded
+                            if (sk == null) {
+                                screen = Screen.Settings
+                            } else {
+                                ViewingKeyScreen(
+                                    viewKey = "stellaview2:" + android.util.Base64.encodeToString(
+                                        sk.encryptionPrivate + sk.nullifierKey, android.util.Base64.NO_WRAP,
+                                    ),
+                                    onClose = { screen = Screen.Settings },
+                                )
+                            }
+                        }
+                        Screen.AuditScan -> AuditScreen(
+                            commitments = remember { chainStore.commitmentsSince(0) },
+                            nullifiers = remember { chainStore.allNullifiers() },
+                            onClose = { screen = Screen.Settings },
+                        )
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SuccessScreen(verb: String, amount: String, txHash: String, onClose: () -> Unit) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val explorer = "https://stellar.expert/explorer/testnet/tx/$txHash"
-    Column(
-        Modifier.fillMaxSize().background(Umbra.Bg).padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.weight(1f))
-        Box(
-            Modifier.size(96.dp).clip(CircleShape).background(Umbra.Success),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Check, null, tint = Umbra.Bg, modifier = Modifier.size(48.dp)) }
-        Spacer(Modifier.height(28.dp))
-        Text(verb, color = Umbra.TextPrimary, fontFamily = Umbra.Display, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(10.dp))
-        Text("$amount XLM", color = Umbra.TextSecondary, fontSize = 16.sp)
-        Spacer(Modifier.height(24.dp))
-        Text("Confirmed on Stellar testnet · tap to copy", color = Umbra.TextFaint, fontSize = 12.sp)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "${txHash.take(12)}…${txHash.takeLast(8)}",
-            color = Umbra.PrimaryLight, fontFamily = Umbra.Mono, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.clickable { copyToClipboard(ctx, "Transaction id", txHash) },
-        )
-        Spacer(Modifier.height(14.dp))
-        Box(
-            Modifier.clip(RoundedCornerShape(12.dp)).background(Umbra.SurfaceElevated)
-                .clickable { openUrl(ctx, explorer) }.padding(horizontal = 16.dp, vertical = 10.dp),
-        ) { Text("View on stellar.expert ↗", color = Umbra.PrimaryLight, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
-        Spacer(Modifier.weight(1f))
-        Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.Primary)
-                .clickable { onClose() }
-                .padding(vertical = 16.dp),
-            contentAlignment = Alignment.Center,
-        ) { Text("Done", color = Umbra.IconOnPrimary, fontWeight = FontWeight.SemiBold) }
     }
 }
 
@@ -953,4 +1112,28 @@ private fun parseShieldedAddress(addr: String): Pair<String, String> {
     require(blob.size == 64) { "invalid shielded address" }
     fun hex(b: ByteArray) = "0x" + b.joinToString("") { "%02x".format(it) }
     return Pair(hex(blob.copyOfRange(0, 32)), hex(blob.copyOfRange(32, 64)))
+}
+
+/**
+ * Copy the bundled `policy_tx_4_2_final.zkey` asset (Task B6 rapidsnark
+ * backend) to internal storage once and return the on-disk path — assets
+ * aren't directly file-pathable, and rapidsnark's zkey loader needs a real
+ * path. Re-copies when missing or when the APK is newer (app update may ship
+ * a new zkey).
+ *
+ * NB: no `assets.openFd()` here — it throws on AAPT-compressed assets
+ * ("cannot be opened as a file descriptor"); stream-copy works either way.
+ * Copies via temp + rename so a killed copy can't leave a truncated zkey.
+ */
+private fun ensureRapidsnarkZkey(context: android.content.Context): String {
+    val dest = java.io.File(context.filesDir, RAPIDSNARK_ZKEY_ASSET)
+    val apkTime = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+    if (!dest.exists() || dest.lastModified() < apkTime) {
+        val tmp = java.io.File(context.filesDir, "$RAPIDSNARK_ZKEY_ASSET.tmp")
+        context.assets.open(RAPIDSNARK_ZKEY_ASSET).use { input ->
+            tmp.outputStream().use { output -> input.copyTo(output) }
+        }
+        if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }
+    }
+    return dest.absolutePath
 }

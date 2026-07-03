@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+ QR-appropriate replacement for zxing-android-embedded's res/layout/zxing_barcode_scanner.xml.
+ Same structure and required ids (zxing_barcode_surface, zxing_viewfinder_view, zxing_status_view)
+ so DecoratedBarcodeView.initialize() can find its children, but the viewfinder is our
+ QrViewfinderView (no laser, corner brackets) instead of the stock ViewfinderView.
+-->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <com.journeyapps.barcodescanner.BarcodeView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:id="@+id/zxing_barcode_surface"/>
+
+    <com.privatepayments.ui.QrViewfinderView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:id="@+id/zxing_viewfinder_view"/>
+
+    <TextView android:id="@+id/zxing_status_view"
+              android:layout_width="wrap_content"
+              android:layout_height="wrap_content"
+              android:layout_gravity="bottom|center_horizontal"
+              android:layout_marginBottom="48dp"
+              android:background="@color/zxing_transparent"
+              android:text=""
+              android:textColor="@color/zxing_status_text"/>
+</merge>

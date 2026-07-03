@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Policy
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -47,6 +49,8 @@ fun SettingsScreen(
     onAdd: suspend () -> Unit,
     onRecovery: () -> Unit,
     onBackup: () -> Unit,
+    onViewingKey: () -> Unit,
+    onAudit: () -> Unit,
     onClose: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -86,6 +90,13 @@ fun SettingsScreen(
         SettingRow(Icons.Filled.Key, "Recovery phrase", "View or import your 12 words", onRecovery)
         Spacer(Modifier.height(8.dp))
         SettingRow(Icons.Filled.CloudUpload, "Cloud backup", "Encrypted note history to Google Drive", onBackup)
+
+        Spacer(Modifier.height(24.dp))
+        Text("AUDITING", color = Umbra.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
+        Spacer(Modifier.height(8.dp))
+        SettingRow(Icons.Filled.Visibility, "Viewing key", "Give an auditor read access to incoming funds", onViewingKey)
+        Spacer(Modifier.height(8.dp))
+        SettingRow(Icons.Filled.Policy, "Audit a wallet", "Inspect incoming funds with a viewing key", onAudit)
 
         Spacer(Modifier.height(24.dp))
         Text("Stella · Stellar testnet · v0.1", color = Umbra.TextFaint, fontSize = 12.sp)
@@ -151,8 +162,7 @@ private fun AccountDropdown(accounts: List<AccountInfo>, activeIndex: Int, onSwi
     }
 }
 
-private fun shortAddr(a: String?): String =
-    if (a != null && a.length > 14) "${a.take(8)}…${a.takeLast(6)}" else (a ?: "—")
+private fun shortAddr(a: String?): String = a?.let { shortAddress(it, 8, 6) } ?: "—"
 
 @Composable
 private fun AccountAvatar(index: Int) {

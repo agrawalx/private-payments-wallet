@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,8 +34,10 @@ fun ConfirmScreen(
     typeLabel: String,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
+    warning: String? = null,
 ) {
     val accent = if (isPublic) Umbra.Public else Umbra.Primary
+    val haptics = rememberHaptics()
     Column(Modifier.fillMaxSize().umbraScreen().padding(24.dp)) {
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -80,8 +83,22 @@ fun ConfirmScreen(
             )
         }
 
+        warning?.let { msg ->
+            Spacer(Modifier.height(16.dp))
+            Row(
+                Modifier.fillMaxWidth().accentWash(
+                    Umbra.Warning.copy(alpha = 0.14f), Umbra.Warning.copy(alpha = 0.4f), RoundedCornerShape(12.dp),
+                ).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Warning, null, tint = Umbra.Warning, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(msg, color = Umbra.TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+            }
+        }
+
         Spacer(Modifier.weight(1f))
-        GradientButton("Confirm & sign", Modifier.fillMaxWidth(), onClick = onConfirm)
+        GradientButton("Confirm & sign", Modifier.fillMaxWidth(), onClick = { haptics.tick(); onConfirm() })
         Spacer(Modifier.height(10.dp))
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Umbra.SurfaceElevated)
@@ -89,21 +106,4 @@ fun ConfirmScreen(
             contentAlignment = Alignment.Center,
         ) { Text("Back", color = Umbra.TextSecondary, fontWeight = FontWeight.Medium) }
     }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String, valueColor: androidx.compose.ui.graphics.Color, mono: Boolean = false) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Umbra.TextMuted, fontSize = 13.sp)
-        Spacer(Modifier.weight(1f))
-        Text(
-            value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-            fontFamily = if (mono) Umbra.Mono else Umbra.Body, maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun Divider() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Umbra.Border))
 }

@@ -7,6 +7,12 @@ android {
     namespace 'com.privatepayments'
     compileSdk 34
 
+    // Ship the rapidsnark .zkey uncompressed: zkey data is high-entropy (zip
+    // gains ~nothing) and uncompressed assets stream-copy faster on first run.
+    androidResources {
+        noCompress 'zkey'
+    }
+
     defaultConfig {
         applicationId "com.privatepayments"
         minSdk 26
@@ -69,6 +75,9 @@ dependencies {
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     // QR codes for the Receive screen (encode the active address).
     implementation 'com.google.zxing:core:3.5.3'
+    // QR scanning (camera) for recipient addresses — non-transitive since
+    // zxing:core is already pinned above and we don't need its bundled deps.
+    implementation('com.journeyapps:zxing-android-embedded:4.3.0') { transitive = false }
     // Phase 7 backup: Google Sign-In to authorize Drive appDataFolder access.
     // We get an OAuth token for the drive.appdata scope and call the Drive REST
     // API over raw HTTP (no heavy google-api-services-drive client).

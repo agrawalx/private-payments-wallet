@@ -1,0 +1,21 @@
+[Unit]
+Description=Private Payments Privacy Relayer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/pp
+Environment=RELAYER_BIND=127.0.0.1:8090
+Environment=RELAYER_RPC_URL=https://soroban-testnet.stellar.org
+# RELAYER_POOL_ID defaults to the fresh pool (compiled in). Override if needed.
+# A persistent, funded relayer account lives here (written by setup-server.sh on
+# first run). Without it the relayer mints+friendbots a NEW account each restart.
+EnvironmentFile=-/opt/pp/relayer.env
+ExecStart=/opt/pp/bin/relayer
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

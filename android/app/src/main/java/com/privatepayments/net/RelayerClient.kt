@@ -16,7 +16,7 @@ import java.net.URL
  * On the device, reach the host-run relayer via `adb reverse tcp:8090 tcp:8090`.
  */
 object RelayerClient {
-    private const val BASE = "http://127.0.0.1:8090"
+    private val BASE = Endpoints.RELAYER_BASE
 
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.NO_WRAP)
 
@@ -54,4 +54,15 @@ object RelayerClient {
         if (code !in 200..299) throw RuntimeException("relayer error $code: $text")
         return JSONObject(text).getString("hash")
     }
+
+    /** Lightweight liveness check (GET /health) — used to warn before a relayed
+     *  send if the relayer looks unreachable. Never throws. */
+    fun health(): Boolean = runCatching {
+        val conn = (URL("$BASE/health").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 2000
+            readTimeout = 2000
+        }
+        conn.responseCode in 200..299
+    }.getOrDefault(false)
 }

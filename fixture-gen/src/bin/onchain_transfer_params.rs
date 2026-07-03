@@ -65,7 +65,7 @@ fn main() -> Result<()> {
     let note_pub = NotePublicKey(pubkey);
 
     let sig = KeyDerivationSignature((0..64u8).collect());
-    let (_n, enc_kp) = derive_encryption_and_note_keypairs(sig)?;
+    let (_n, enc_kp, _nk) = derive_encryption_and_note_keypairs(sig)?;
     let enc_pub = EncryptionPublicKey(enc_kp.public.0);
 
     // Pool tree from all 6 commitments; path to our note at index 4.

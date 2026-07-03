@@ -5,13 +5,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.widget.Toast
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -47,10 +51,13 @@ fun PeopleScreen(
     contacts: List<Contact>,
     onAddContact: (name: String, publicAddress: String?, shieldedAddress: String?) -> Unit,
     onRemoveContact: (String) -> Unit,
+    onUpdateContact: (Contact) -> Unit = {},
     onSendToPublic: (String) -> Unit,
     onSendToShielded: (String) -> Unit,
     onSettings: () -> Unit,
     onSelectTab: (HomeTab) -> Unit,
+    syncStatus: SyncStatus = SyncStatus(SyncState.Ok, ""),
+    onRetrySync: () -> Unit = {},
 ) {
     val isPublic = mode == WalletMode.Public
     var showAdd by remember { mutableStateOf(false) }
@@ -59,7 +66,9 @@ fun PeopleScreen(
         Column(Modifier.weight(1f).padding(horizontal = 20.dp)) {
             Spacer(Modifier.height(16.dp))
             TopBar(address, accountLabel, isPublic, onSettings)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(14.dp))
+            SyncBanner(syncStatus, onRetrySync)
+            Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("People", color = Umbra.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, fontFamily = Umbra.Display)
                 Spacer(Modifier.weight(1f))
@@ -78,7 +87,7 @@ fun PeopleScreen(
             Spacer(Modifier.height(16.dp))
 
             if (showAdd) {
-                AddContactForm(
+                ContactForm(
                     onSave = { name, pub, shielded -> onAddContact(name, pub, shielded); showAdd = false },
                     onCancel = { showAdd = false },
                 )
@@ -102,7 +111,13 @@ fun PeopleScreen(
                 }
             } else {
                 contacts.forEach { c ->
-                    ContactRow(c, onSendToPublic = { onSendToPublic(c.publicAddress!!) }, onSendToShielded = { onSendToShielded(c.shieldedAddress!!) }, onRemove = { onRemoveContact(c.id) })
+                    ContactRow(
+                        c,
+                        onSendToPublic = { onSendToPublic(c.publicAddress!!) },
+                        onSendToShielded = { onSendToShielded(c.shieldedAddress!!) },
+                        onRemove = { onRemoveContact(c.id) },
+                        onUpdate = onUpdateContact,
+                    )
                     Spacer(Modifier.height(10.dp))
                 }
             }
@@ -113,8 +128,15 @@ fun PeopleScreen(
 }
 
 @Composable
-private fun ContactRow(c: Contact, onSendToPublic: () -> Unit, onSendToShielded: () -> Unit, onRemove: () -> Unit) {
+private fun ContactRow(
+    c: Contact,
+    onSendToPublic: () -> Unit,
+    onSendToShielded: () -> Unit,
+    onRemove: () -> Unit,
+    onUpdate: (Contact) -> Unit,
+) {
     var confirmRemove by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().elevatedCard(RoundedCornerShape(16.dp)).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -133,11 +155,23 @@ private fun ContactRow(c: Contact, onSendToPublic: () -> Unit, onSendToShielded:
                 }
             }
             Icon(
+                Icons.Filled.Edit, "Edit contact", tint = Umbra.TextFaint,
+                modifier = Modifier.size(16.dp).clickable { editing = !editing; confirmRemove = false },
+            )
+            Spacer(Modifier.width(14.dp))
+            Icon(
                 Icons.Filled.Close, "Remove contact", tint = Umbra.TextFaint,
-                modifier = Modifier.size(16.dp).clickable { confirmRemove = !confirmRemove },
+                modifier = Modifier.size(16.dp).clickable { confirmRemove = !confirmRemove; editing = false },
             )
         }
-        if (confirmRemove) {
+        if (editing) {
+            Spacer(Modifier.height(12.dp))
+            ContactForm(
+                initial = c,
+                onSave = { name, pub, shielded -> onUpdate(c.copy(name = name, publicAddress = pub, shieldedAddress = shielded)); editing = false },
+                onCancel = { editing = false },
+            )
+        } else if (confirmRemove) {
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Text(
@@ -184,15 +218,43 @@ private fun SendChip(label: String, accent: androidx.compose.ui.graphics.Color, 
     ) { Text(label, color = accent, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold) }
 }
 
+/** A shielded "stella:" address is base64 — public G-addresses are 56 chars, G + [A-Z2-7]{55}. */
+private val publicAddressRegex = Regex("G[A-Z2-7]{55}")
+
 @Composable
-private fun AddContactForm(onSave: (String, String?, String?) -> Unit, onCancel: () -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var pub by remember { mutableStateOf("") }
-    var shielded by remember { mutableStateOf("") }
+private fun ContactForm(
+    initial: Contact? = null,
+    onSave: (String, String?, String?) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var pub by remember { mutableStateOf(initial?.publicAddress ?: "") }
+    var shielded by remember { mutableStateOf(initial?.shieldedAddress ?: "") }
     val canSave = name.isNotBlank() && (pub.isNotBlank() || shielded.isNotBlank())
+    val haptics = rememberHaptics()
+    val editing = initial != null
 
     Column(Modifier.fillMaxWidth().elevatedCard(RoundedCornerShape(18.dp)).padding(16.dp)) {
-        Text("New contact", color = Umbra.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(if (editing) "Edit contact" else "New contact", color = Umbra.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        val scan = rememberQrScanner { scanned ->
+            val text = scanned.trim()
+            when {
+                text.startsWith("stella:") -> shielded = text
+                publicAddressRegex.matches(text) -> pub = text
+                else -> Toast.makeText(ctx, "Not a Stella address", Toast.LENGTH_SHORT).show()
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Umbra.Surface)
+                .clickable { scan() }.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.QrCodeScanner, null, tint = Umbra.TextSecondary, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Scan QR", color = Umbra.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
         Spacer(Modifier.height(12.dp))
         FormField("Name", name, "e.g. Alex") { name = it }
         Spacer(Modifier.height(10.dp))
@@ -209,10 +271,15 @@ private fun AddContactForm(onSave: (String, String?, String?) -> Unit, onCancel:
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
                     .background(if (canSave) Umbra.Primary else Umbra.SurfaceElevated)
-                    .clickable(enabled = canSave) { onSave(name.trim(), pub.ifBlank { null }, shielded.ifBlank { null }) }
+                    .clickable(enabled = canSave) { haptics.confirm(); onSave(name.trim(), pub.ifBlank { null }, shielded.ifBlank { null }) }
                     .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Save", color = if (canSave) Umbra.IconOnPrimary else Umbra.TextFaint, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+            ) {
+                Text(
+                    if (editing) "Save changes" else "Save",
+                    color = if (canSave) Umbra.IconOnPrimary else Umbra.TextFaint, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

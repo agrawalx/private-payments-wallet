@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# One-shot dev tool: builds a known-good policy_tx_2_2 circuit-input vector
+# One-shot dev tool: builds a known-good policy_tx_4_2 circuit-input vector
 # using the reference repo's test utilities and writes it as flat JSON for the
 # Milestone 0 desktop/on-device proof tests. Not shipped in the app.
 

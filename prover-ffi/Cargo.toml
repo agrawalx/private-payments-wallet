@@ -50,11 +50,29 @@ rand = "0.8"
 bip39 = { version = "2", features = ["rand"] }
 hmac = "0.12"
 
+# Optional rapidsnark proving backend (Task B6), default OFF — the cached
+# arkworks `Prover` above stays the shipped default. Enable with
+# `--features rapidsnark`. Thin FFI wrapper around the rapidsnark C++ prover;
+# ships prebuilt static libs for aarch64-linux-android + x86_64 desktop (see
+# rust-rapidsnark's own build.rs), so no NDK-side C++ toolchain work needed.
+rust-rapidsnark = { version = "0.1.3", optional = true }
+
+[features]
+rapidsnark = ["dep:rust-rapidsnark"]
+
 [dev-dependencies]
 # Desktop-only: the `submit_deposit_onchain` test drives the RPC itself to
 # validate the build/sign split end-to-end off-device. Not linked into the
 # Android `.so` (dev-deps never reach the cdylib target).
 reqwest = { version = "0.13.3", features = ["json", "blocking"] }
+# Desktop-only: the rapidsnark encoding-equivalence test decodes the 256-byte
+# Soroban proof back into arkworks points and re-verifies with the existing
+# cached `Prover`, to prove the re-encoding round-trips correctly. Versions
+# match the ark-* stack pinned by the vendored `prover` crate (vendor/Cargo.toml).
+ark-bn254 = "0.6.0"
+ark-ff = "0.6.0"
+ark-groth16 = "0.6.0"
+ark-serialize = "0.6.0"
 
 [build-dependencies]
 rust-witness = "0.1"
