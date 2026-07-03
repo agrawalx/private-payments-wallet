@@ -7,8 +7,8 @@ privately — amounts and links are hidden behind a Groth16 proof the phone prod
 rapidsnark). A second, fully classic **☀ Public** mode sits right alongside for plain public XLM.
 
 <p align="center">
-  <img src="screenshots/home_shielded.png" width="230" alt="Shielded home" />
-  <img src="screenshots/home_public.png"   width="230" alt="Public home" />
+  <img src="screenshots/private_home.jpg" width="230" alt="Shielded home" />
+  <img src="screenshots/public_home.jpg"   width="230" alt="Public home" />
 </p>
 
 > **Testnet only. Unaudited. Do not use with real assets.**
@@ -29,9 +29,6 @@ rapidsnark). A second, fully classic **☀ Public** mode sits right alongside fo
 <a name="feature-guide"></a>
 ## Feature guide
 
-> **Screenshots are placeholders.** Drop PNGs into `screenshots/` using the filenames below and they
-> render automatically. Each entry is: *what it is* → *how to use it*.
-
 ### 1. Onboarding — create or import a wallet
 One BIP39 12-word phrase (SEP-5 `m/44'/148'/0'`), Keystore-encrypted on device. From it Stella
 derives unlimited accounts, each with its own Stellar address **and** its own shielded (note +
@@ -41,9 +38,9 @@ encryption) keys.
 → confirm a few words → you land on Home.
 
 <p align="center">
-  <img src="screenshots/01_onboarding_welcome.png"  width="220" alt="Welcome" />
-  <img src="screenshots/02_onboarding_seed.png"     width="220" alt="Recovery phrase" />
-  <img src="screenshots/03_onboarding_confirm.png"  width="220" alt="Confirm phrase" />
+  <img src="screenshots/welcome.jpg"  width="220" alt="Welcome" />
+  <img src="screenshots/recovery_seed.jpg"     width="220" alt="Recovery phrase" />
+  <img src="screenshots/confirm.jpg"  width="220" alt="Confirm phrase" />
 </p>
 
 ### 2. Two faces, one wallet — Public ☀ / Shielded 🔒
