@@ -126,7 +126,10 @@ spinner row instantly and resolve when the note-set changes.
 Hero amount + type/status/date/privacy badge. Public txns get a stellar.expert button; shielded
 events show leaf index + commitment (no public tx hash exists for a shielded event).
 
-<p align="center"><img src="screenshots/17_tx_detail.png" width="230" alt="Transaction detail" /></p>
+<p align="center">
+  <img src="screenshots/public_tx.jpg" width="230" alt="Transaction detail" />
+  <img src="screenshots/private_tx.jpg" width="230" alt="Transaction detail" />
+</p>
 
 ### 12. People — address book + QR scan
 Save a name against a public `G…` and/or shielded `stella:` address, then send straight to it. New
@@ -137,14 +140,17 @@ chips** on the Send screen (MetaMask-style), no copy-paste round trip.
 Send prefilled. Edit with the pencil.
 
 <p align="center">
-  <img src="screenshots/18_people.png"   width="220" alt="People / contacts" />
-  <img src="screenshots/19_qr_scan.png"  width="220" alt="QR scanner" />
+  <img src="screenshots/add_people.jpg"   width="220" alt="People / contacts" />
+  <img src="screenshots/contacts.jpg"  width="220" alt="QR scanner" />
 </p>
 
 ### 13. Receive
 Shows a QR + copyable string for the active address (public `G…` or shielded `stella:`).
 
-<p align="center"><img src="screenshots/20_receive.png" width="230" alt="Receive QR" /></p>
+<p align="center">
+  <img src="screenshots/public_recieve.jpg" width="230" alt="Receive QR" />
+  <img src="screenshots/private_recieve.jpg" width="230" alt="Receive QR" />
+</p>
 
 ### 14. Viewing key — auditor disclosure (export)
 Export a **`stellaview2:`** viewing key = your encryption key **+** nullifier-deriving key (`nk`).
@@ -155,7 +161,7 @@ possible. It is permanent and irrevocable; the export screen states this before 
 
 **How to use:** **Settings → Viewing key** → read the warning → **Copy** / **Share** / show QR.
 
-<p align="center"><img src="screenshots/21_viewing_key.png" width="230" alt="Viewing key export" /></p>
+<p align="center"><img src="screenshots/viewing_key.jpg" width="230" alt="Viewing key export" /></p>
 
 ### 15. Audit a wallet
 Paste (or scan) someone's `stellaview2:` key to replay their history read-only: total received, spend
@@ -164,7 +170,7 @@ netting, change detection, net unspent — with dates.
 **How to use:** **Settings → Audit a wallet** → paste key → watch *"Scanned N of M"* → read the
 report.
 
-<p align="center"><img src="screenshots/22_audit.png" width="230" alt="Audit a wallet" /></p>
+<p align="center"><img src="screenshots/wallet_audit.jpg" width="230" alt="Audit a wallet" /></p>
 
 ### 16. Proof of funds (selective disclosure)
 Prove ownership of a note of amount **X**, bound to a named authority + purpose, without revealing
@@ -172,15 +178,18 @@ which note or your balance. Four on-verify checks: proof ∧ context ∧ known-r
 
 **How to use:** Shielded Home → **Prove funds** → authority + purpose → **Copy / Share** the receipt.
 
-<p align="center"><img src="screenshots/23_prove_funds.png" width="230" alt="Proof of funds" /></p>
+<p align="center">
+<img src="screenshots/proof_funds_1.jpg" width="230" alt="Proof of funds" />
+<img src="screenshots/proof_funds_2.jpg" width="230" alt="Proof of funds" />
+</p>
 
 ### 17. Settings — accounts, recovery, backup
 Switch/add accounts (each a distinct SEP-5 address with its own shielded keys), reveal the recovery
 phrase, and take an **encrypted Google Drive backup** (AES-256-GCM, `appDataFolder`).
 
 <p align="center">
-  <img src="screenshots/24_settings.png"       width="220" alt="Settings" />
-  <img src="screenshots/25_account_switch.png" width="220" alt="Account switcher" />
+  <img src="screenshots/setting.jpg"       width="220" alt="Settings" />
+  <img src="screenshots/backup.jpg" width="220" alt="Account switcher" />
 </p>
 
 ### 18. Network status & haptics
@@ -188,7 +197,7 @@ A sync banner on every tab (green / amber / red dot + **Retry**); a warning on t
 Confirm screen when the relayer is unreachable. Haptic ticks on confirm, copy, mode-switch, and
 success/error.
 
-<p align="center"><img src="screenshots/26_network_banner.png" width="230" alt="Network status banner" /></p>
+<p align="center"><img src="screenshots/network.png" width="230" alt="Network status banner" /></p>
 
 ---
 
