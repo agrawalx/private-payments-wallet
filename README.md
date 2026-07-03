@@ -6,11 +6,6 @@ Nethermind's privacy-pool Soroban contracts + Circom circuits, **forked and vend
 privately — amounts and links are hidden behind a Groth16 proof the phone produces itself (~1.9 s via
 rapidsnark). A second, fully classic **☀ Public** mode sits right alongside for plain public XLM.
 
-<p align="center">
-  <img src="screenshots/private_home.jpg" width="230" alt="Shielded home" />
-  <img src="screenshots/public_home.jpg"   width="230" alt="Public home" />
-</p>
-
 > **Testnet only. Unaudited. Do not use with real assets.**
 
 ---
@@ -52,8 +47,8 @@ circular reveal anchored to the thumb.
 rail.
 
 <p align="center">
-  <img src="screenshots/04_mode_slider.png" width="230" alt="Mode slider" />
-  <img src="screenshots/05_home_public.png" width="230" alt="Public home" />
+  <img src="screenshots/private_home.jpg" width="230" alt="Shielded home" />
+  <img src="screenshots/public_home.jpg"   width="230" alt="Public home" />
 </p>
 
 ### 3. Fund from testnet
@@ -61,7 +56,7 @@ New accounts start empty. One tap asks friendbot for testnet XLM.
 
 **How to use:** **Fund from testnet** on Home → wait for the balance to appear.
 
-<p align="center"><img src="screenshots/06_fund_testnet.png" width="230" alt="Fund from testnet" /></p>
+<p align="center"><img src="screenshots/testnet_fund.png" width="230" alt="Fund from testnet" /></p>
 
 ### 4. Register (one-time ASP enrollment)
 To **spend** from the pool (deposit, send, withdraw) an account is enrolled once into the on-chain
@@ -69,7 +64,7 @@ ASP membership set. **Receiving needs no enrollment.**
 
 **How to use:** the app prompts on your first spend → **Register** → one on-chain tx, then continue.
 
-<p align="center"><img src="screenshots/07_register.png" width="230" alt="Register" /></p>
+<p align="center"><img src="screenshots/register.jpg" width="230" alt="Register" /></p>
 
 ### 5. Deposit — public XLM into the shielded pool
 Moves public XLM into the pool as an encrypted note. Public and always self-submitted (the deposit
@@ -78,8 +73,8 @@ amount is visible by design; the note contents are not).
 **How to use:** Shielded Home → **Deposit** → amount → **Confirm** → proof builds → done.
 
 <p align="center">
-  <img src="screenshots/08_deposit_amount.png"  width="220" alt="Deposit amount" />
-  <img src="screenshots/09_confirm.png"         width="220" alt="Confirm" />
+  <img src="screenshots/deposit_amount.jpg"  width="220" alt="Deposit amount" />
+  <img src="screenshots/deposit_confirm.jpg"         width="220" alt="Confirm" />
 </p>
 
 ### 6. Private send (P2P) — routed through the relayer
