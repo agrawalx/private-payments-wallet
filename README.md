@@ -396,8 +396,7 @@ The private-send tx demonstrates source unlinkability: its on-chain `source_acco
 
 <a name="demo"></a>
 ## Demo
-
-_(demo video / walkthrough link — TODO)_
+**[https://www.youtube.com/watch?v=UtlBd21iGj8](Youtube Link)**
 
 For a deep dive into the cryptography, contracts, and full request traces, see
 **[walkthrough.md](walkthrough.md)**; for the viewing-key design, **[docs/full-viewing-key.md](docs/full-viewing-key.md)**.
